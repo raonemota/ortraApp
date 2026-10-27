@@ -4,329 +4,329 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { clinicalStorage } from './services/storageService.ts';
-import {
-  UserProfile,
-  Patient,
-  Assessment,
-  Evolution,
-} from './types/index.ts';
-import { hasAdminPrivileges } from './utils/clinicalCalculations.ts';
+import { supabase } from './services/supabaseClient';
+import { UserProfile, Patient } from './types/index';
 
-// Components
-import { Header } from './components/Header.tsx';
-import { LoginView } from './components/LoginView.tsx';
-import { PatientsListView } from './components/PatientsListView.tsx';
-import { PatientDetailView } from './components/PatientDetailView.tsx';
-import { NewAssessmentView } from './components/NewAssessmentView.tsx';
-import { FinancialReportsView } from './components/FinancialReportsView.tsx';
-import { AdminPanel } from './components/AdminPanel.tsx';
-import { PatientFormModal } from './components/PatientFormModal.tsx';
-import { PatientChecklistModal } from './components/PatientChecklistModal.tsx';
-import { EvolutionModal } from './components/EvolutionModal.tsx';
-import { ForcePasswordChangeModal } from './components/ForcePasswordChangeModal.tsx';
-import { OnboardingTour } from './components/OnboardingTour.tsx';
-import { PrintProntuarioModal } from './components/PrintProntuarioModal.tsx';
+// Componentes
+import { Header } from './components/Header';
+import { LoginView } from './components/LoginView';
+import { PatientsListView } from './components/PatientsListView';
+import { PatientDetailView } from './components/PatientDetailView';
+import { NewAssessmentView } from './components/NewAssessmentView';
+import { FinancialReportsView } from './components/FinancialReportsView';
+import { AdminPanel } from './components/AdminPanel';
+import { PatientFormModal } from './components/PatientFormModal';
+import { PatientChecklistModal } from './components/PatientChecklistModal';
+import { EvolutionModal } from './components/EvolutionModal';
+import { ForcePasswordChangeModal } from './components/ForcePasswordChangeModal';
+import { OnboardingTour } from './components/OnboardingTour';
+import { PrintProntuarioModal } from './components/PrintProntuarioModal';
+import { Loader2 } from 'lucide-react';
 
 export default function App() {
-  // Authentication State
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() =>
-    clinicalStorage.isAuthenticated()
-  );
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isInitializing, setIsInitializing] = useState<boolean>(true);
 
-  // Current logged in profile & roles
-  const [currentUser, setCurrentUser] = useState<UserProfile>(() =>
-    clinicalStorage.getCurrentUser()
-  );
-
-  // Main navigation view
+  // Navegação
   const [currentView, setCurrentView] = useState<'patients' | 'financial' | 'admin'>('patients');
-
-  // Application Data States
-  const [profiles, setProfiles] = useState<UserProfile[]>(() => clinicalStorage.getProfiles());
-  const [patients, setPatients] = useState<Patient[]>(() => clinicalStorage.getPatients());
-  const [assessments, setAssessments] = useState<Assessment[]>(() =>
-    clinicalStorage.getAssessments()
-  );
-  const [evolutions, setEvolutions] = useState<Evolution[]>(() => clinicalStorage.getEvolutions());
-
-  // Deep clinical view state
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
-  const [isCreatingAssessment, setIsCreatingAssessment] = useState(false);
 
-  // Modals state
-  const [isPatientModalOpen, setIsPatientModalOpen] = useState(false);
+  // Estados dos Modais
+  const [isPatientFormOpen, setIsPatientFormOpen] = useState(false);
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
-
+  const [isChecklistOpen, setIsChecklistOpen] = useState(false);
   const [checklistPatient, setChecklistPatient] = useState<Patient | null>(null);
+  const [isAssessmentOpen, setIsAssessmentOpen] = useState(false);
+  const [assessmentPatient, setAssessmentPatient] = useState<Patient | null>(null);
+  const [isEvolutionOpen, setIsEvolutionOpen] = useState(false);
   const [evolutionPatient, setEvolutionPatient] = useState<Patient | null>(null);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [printPatient, setPrintPatient] = useState<Patient | null>(null);
 
-  const [printableData, setPrintableData] = useState<{
-    patient: Patient;
-    assessment: Assessment;
-  } | null>(null);
+  // Gatilho de recarregamento para as listagens
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  // Tour State
-  const [isTourOpen, setIsTourOpen] = useState(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('autostart') === '1') {
-      return false;
+  // Função auxiliar para obter os dados do perfil a partir do Supabase
+  const fetchUserProfile = async (userId: string): Promise<UserProfile | null> => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (error || !data) return null;
+
+      return {
+        id: data.id,
+        email: data.email,
+        fullName: data.full_name,
+        role: data.role,
+        isAdmin: data.role === 'admin',
+        phone: data.phone || '',
+        crefito: data.crefito || '',
+        commissionRate: data.default_session_rate || 0,
+        hasCompletedTour: data.has_completed_tour,
+        mustChangePassword: data.must_change_password,
+        active: data.active,
+        createdAt: data.created_at,
+      };
+    } catch {
+      return null;
     }
-    const user = clinicalStorage.getCurrentUser();
-    return !user.hasCompletedTour;
-  });
-
-  // Reload records from clinicalStorage
-  const refreshData = () => {
-    setProfiles(clinicalStorage.getProfiles());
-    setPatients(clinicalStorage.getPatients());
-    setAssessments(clinicalStorage.getAssessments());
-    setEvolutions(clinicalStorage.getEvolutions());
   };
 
-  // RBAC safety check: if user loses admin privileges and is in admin view, return to patients
+  // Inicialização e subscrição de alterações de sessão
   useEffect(() => {
-    if (currentView === 'admin' && !hasAdminPrivileges(currentUser)) {
-      setCurrentView('patients');
-    }
-  }, [currentView, currentUser]);
+    let mounted = true;
 
-  // User Switcher (For demonstration & testing)
-  const handleUserSwitch = (newUser: UserProfile) => {
-    clinicalStorage.setCurrentUser(newUser);
-    setCurrentUser(newUser);
-    if (!hasAdminPrivileges(newUser) && currentView === 'admin') {
-      setCurrentView('patients');
+    async function initSession() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user && mounted) {
+          const profile = await fetchUserProfile(session.user.id);
+          if (profile && profile.active) {
+            setCurrentUser(profile);
+            setIsAuthenticated(true);
+          } else {
+            await supabase.auth.signOut();
+            setCurrentUser(null);
+            setIsAuthenticated(false);
+          }
+        }
+      } catch (err) {
+        console.error('Erro ao restaurar sessão:', err);
+      } finally {
+        if (mounted) setIsInitializing(false);
+      }
     }
-  };
 
-  // Logout Handler
-  const handleLogout = () => {
-    clinicalStorage.logout();
+    initSession();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_OUT' || !session) {
+          setCurrentUser(null);
+          setIsAuthenticated(false);
+          setSelectedPatientId(null);
+        } else if (event === 'SIGNED_IN' && session?.user) {
+          const profile = await fetchUserProfile(session.user.id);
+          if (profile && profile.active) {
+            setCurrentUser(profile);
+            setIsAuthenticated(true);
+          }
+        }
+      }
+    );
+
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setCurrentUser(null);
     setIsAuthenticated(false);
+    setSelectedPatientId(null);
   };
 
-  // Login Success Handler
-  const handleLoginSuccess = (user: UserProfile) => {
-    setCurrentUser(user);
-    setIsAuthenticated(true);
-    refreshData();
+  const handlePasswordChanged = () => {
+    if (currentUser) {
+      setCurrentUser({ ...currentUser, mustChangePassword: false });
+    }
   };
 
-  // If user is not authenticated, render LoginView immediately
-  if (!isAuthenticated) {
-    return <LoginView onLoginSuccess={handleLoginSuccess} />;
+  const handleTourCompleted = async () => {
+    if (currentUser) {
+      await supabase
+        .from('profiles')
+        .update({ has_completed_tour: true })
+        .eq('id', currentUser.id);
+
+      setCurrentUser({ ...currentUser, hasCompletedTour: true });
+    }
+  };
+
+  // Ecrã de carregamento inicial
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center text-slate-400 gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-teal-500" />
+        <span className="text-sm">A carregar ambiente seguro...</span>
+      </div>
+    );
   }
 
-  // Selected Patient
-  const selectedPatient = selectedPatientId
-    ? patients.find((p) => p.id === selectedPatientId) || null
-    : null;
-
-  // Assessments and Evolutions for selected patient
-  const patientAssessments = selectedPatient
-    ? assessments.filter((a) => a.patientId === selectedPatient.id)
-    : [];
-  const patientEvolutions = selectedPatient
-    ? evolutions.filter((e) => e.patientId === selectedPatient.id)
-    : [];
-
-  // Handlers for Patient Creation & Checklist
-  const handlePatientSaved = (savedPatient: Patient) => {
-    refreshData();
-    setChecklistPatient(savedPatient);
-  };
-
-  const handleStartAssessmentFromChecklist = (pat: Patient) => {
-    setSelectedPatientId(pat.id);
-    setIsCreatingAssessment(true);
-  };
-
-  // Handler for New Evolution
-  const handleOpenEvolution = (pat: Patient) => {
-    setEvolutionPatient(pat);
-  };
-
-  const handleEvolutionSaved = () => {
-    refreshData();
-  };
-
-  // Handler for Assessment Saved
-  const handleAssessmentSaved = () => {
-    refreshData();
-    setIsCreatingAssessment(false);
-  };
+  // Se não estiver autenticado, exibe o LoginView
+  if (!isAuthenticated || !currentUser) {
+    return <LoginView onLoginSuccess={(profile) => {
+      setCurrentUser(profile);
+      setIsAuthenticated(true);
+    }} />;
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
-      {/* Compulsory Password Change Modal */}
-      {currentUser.mustChangePassword && (
-        <ForcePasswordChangeModal
-          user={currentUser}
-          onPasswordChanged={(updated) => {
-            setCurrentUser(updated);
-            refreshData();
-          }}
-        />
-      )}
-
-      {/* Onboarding Tour Modal */}
-      <OnboardingTour
-        user={currentUser}
-        isOpen={isTourOpen}
-        onClose={() => setIsTourOpen(false)}
-        onTourFinished={(updated) => {
-          setCurrentUser(updated);
-          refreshData();
-        }}
-      />
-
-      {/* Institutional Header */}
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       <Header
         currentUser={currentUser}
-        profiles={profiles}
+        profiles={[]}
         currentView={currentView}
-        onViewChange={(v) => {
-          setCurrentView(v);
+        onViewChange={(view) => {
           setSelectedPatientId(null);
-          setIsCreatingAssessment(false);
+          setCurrentView(view);
         }}
-        onUserSwitch={handleUserSwitch}
+        onUserSwitch={() => {}}
         onLogout={handleLogout}
       />
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-2.5 sm:p-4 lg:p-6">
-        {/* VIEW 1: PATIENTS & PRONTUÁRIOS */}
-        {currentView === 'patients' && (
+      <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-5 lg:p-6">
+        {selectedPatientId ? (
+          <PatientDetailView
+            patientId={selectedPatientId}
+            currentUser={currentUser}
+            onBack={() => setSelectedPatientId(null)}
+            onOpenEvolution={(patient) => {
+              setEvolutionPatient(patient);
+              setIsEvolutionOpen(true);
+            }}
+            onOpenAssessment={(patient) => {
+              setAssessmentPatient(patient);
+              setIsAssessmentOpen(true);
+            }}
+            onOpenPrint={(patient) => {
+              setPrintPatient(patient);
+              setIsPrintModalOpen(true);
+            }}
+            onOpenEdit={(patient) => {
+              setEditingPatient(patient);
+              setIsPatientFormOpen(true);
+            }}
+            refreshTrigger={refreshTrigger}
+          />
+        ) : (
           <>
-            {isCreatingAssessment && selectedPatient ? (
-              <NewAssessmentView
-                patient={selectedPatient}
-                currentUser={currentUser}
-                onBack={() => setIsCreatingAssessment(false)}
-                onSaved={handleAssessmentSaved}
-              />
-            ) : selectedPatient ? (
-              <PatientDetailView
-                patient={selectedPatient}
-                currentUser={currentUser}
-                physioList={profiles}
-                assessments={patientAssessments}
-                evolutions={patientEvolutions}
-                onBack={() => setSelectedPatientId(null)}
-                onNewAssessment={() => setIsCreatingAssessment(true)}
-                onNewEvolution={() => setEvolutionPatient(selectedPatient)}
-                onEditPatient={() => {
-                  setEditingPatient(selectedPatient);
-                  setIsPatientModalOpen(true);
-                }}
-                onOpenChecklist={() => setChecklistPatient(selectedPatient)}
-                onPrintAssessment={(ass) =>
-                  setPrintableData({ patient: selectedPatient, assessment: ass })
-                }
-              />
-            ) : (
+            {currentView === 'patients' && (
               <PatientsListView
                 currentUser={currentUser}
-                patients={patients}
-                physioList={profiles}
-                evolutions={evolutions}
-                assessments={assessments}
-                onSelectPatient={(p) => setSelectedPatientId(p.id)}
-                onOpenNewPatientModal={() => {
+                onSelectPatient={(id) => setSelectedPatientId(id)}
+                onNewPatient={() => {
                   setEditingPatient(null);
-                  setIsPatientModalOpen(true);
+                  setIsPatientFormOpen(true);
                 }}
-                onQuickEvolution={handleOpenEvolution}
-                onOpenChecklist={(p) => setChecklistPatient(p)}
+                refreshTrigger={refreshTrigger}
               />
+            )}
+
+            {currentView === 'financial' && (
+              <FinancialReportsView currentUser={currentUser} />
+            )}
+
+            {currentView === 'admin' && currentUser.isAdmin && (
+              <AdminPanel currentUser={currentUser} />
             )}
           </>
         )}
-
-        {/* VIEW 2: FINANCIAL CONTROL & REPASSE */}
-        {currentView === 'financial' && (
-          <FinancialReportsView
-            currentUser={currentUser}
-            patients={patients}
-            evolutions={evolutions}
-            onEvolutionsUpdated={refreshData}
-          />
-        )}
-
-        {/* VIEW 3: ADMIN PANEL (Protected: Admin or Physio-Admin only) */}
-        {currentView === 'admin' && hasAdminPrivileges(currentUser) && (
-          <AdminPanel
-            currentUser={currentUser}
-            profiles={profiles}
-            patients={patients}
-            onProfilesUpdated={refreshData}
-            onPatientsUpdated={refreshData}
-          />
-        )}
       </main>
 
-      {/* Modals & Overlays */}
-      <PatientFormModal
-        isOpen={isPatientModalOpen}
-        currentUser={currentUser}
-        initialPatient={editingPatient}
-        onClose={() => {
-          setIsPatientModalOpen(false);
-          setEditingPatient(null);
-        }}
-        onPatientSaved={handlePatientSaved}
-      />
-
-      {checklistPatient && (
-        <PatientChecklistModal
-          patient={checklistPatient}
-          isOpen={Boolean(checklistPatient)}
-          onClose={() => setChecklistPatient(null)}
-          onChecklistUpdated={(updated) => {
-            refreshData();
-            setChecklistPatient(updated);
+      {/* Modais de Fluxo */}
+      {isPatientFormOpen && (
+        <PatientFormModal
+          isOpen={isPatientFormOpen}
+          initialData={editingPatient}
+          onClose={() => {
+            setIsPatientFormOpen(false);
+            setEditingPatient(null);
           }}
-          onStartAssessment={handleStartAssessmentFromChecklist}
+          onSaved={(newPatient) => {
+            setIsPatientFormOpen(false);
+            setRefreshTrigger((prev) => prev + 1);
+            if (!editingPatient && newPatient) {
+              setChecklistPatient(newPatient);
+              setIsChecklistOpen(true);
+            }
+          }}
         />
       )}
 
-      {evolutionPatient && (
+      {isChecklistOpen && checklistPatient && (
+        <PatientChecklistModal
+          isOpen={isChecklistOpen}
+          patient={checklistPatient}
+          currentUser={currentUser}
+          onClose={() => {
+            setIsChecklistOpen(false);
+            setChecklistPatient(null);
+          }}
+          onCompleted={() => {
+            setIsChecklistOpen(false);
+            setChecklistPatient(null);
+            setRefreshTrigger((prev) => prev + 1);
+          }}
+        />
+      )}
+
+      {isAssessmentOpen && assessmentPatient && (
+        <NewAssessmentView
+          patient={assessmentPatient}
+          currentUser={currentUser}
+          onClose={() => {
+            setIsAssessmentOpen(false);
+            setAssessmentPatient(null);
+          }}
+          onSaved={() => {
+            setIsAssessmentOpen(false);
+            setAssessmentPatient(null);
+            setRefreshTrigger((prev) => prev + 1);
+          }}
+        />
+      )}
+
+      {isEvolutionOpen && evolutionPatient && (
         <EvolutionModal
+          isOpen={isEvolutionOpen}
           patient={evolutionPatient}
           currentUser={currentUser}
-          isOpen={Boolean(evolutionPatient)}
-          existingEvolution={null}
-          nextSessionNumber={evolutions.filter((e) => e.patientId === evolutionPatient.id).length + 1}
-          onClose={() => setEvolutionPatient(null)}
-          onEvolutionSaved={handleEvolutionSaved}
+          onClose={() => {
+            setIsEvolutionOpen(false);
+            setEvolutionPatient(null);
+          }}
+          onSaved={() => {
+            setIsEvolutionOpen(false);
+            setEvolutionPatient(null);
+            setRefreshTrigger((prev) => prev + 1);
+          }}
         />
       )}
 
-      {printableData && (
+      {isPrintModalOpen && printPatient && (
         <PrintProntuarioModal
-          isOpen={Boolean(printableData)}
-          patient={printableData.patient}
-          assessment={printableData.assessment}
-          physio={profiles.find((p) => p.id === printableData.assessment.physioId) || currentUser}
-          onClose={() => setPrintableData(null)}
+          isOpen={isPrintModalOpen}
+          patient={printPatient}
+          onClose={() => {
+            setIsPrintModalOpen(false);
+            setPrintPatient(null);
+          }}
         />
       )}
 
-      {/* Institutional Footer */}
-      <footer className="bg-slate-900 border-t border-slate-800 text-slate-400 text-xs py-4 px-4 sm:px-6">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <p className="text-[11px] text-slate-400">
-            © 2026 Clínica Ortra de Ortopedia e Fisioterapia · Lauro de Freitas - BA · CNPJ: 14.892.301/0001-44
-          </p>
-          <div className="flex items-center gap-3 text-[11px] text-slate-500">
-            <span>Conformidade COFFITO & LGPD</span>
-            <span>·</span>
-            <span>Segurança da Informação por Design</span>
-          </div>
-        </div>
-      </footer>
+      {/* Validações Obrigatórias do Utilizador */}
+      {currentUser.mustChangePassword && (
+        <ForcePasswordChangeModal
+          isOpen={currentUser.mustChangePassword}
+          currentUser={currentUser}
+          onSuccess={handlePasswordChanged}
+        />
+      )}
+
+      {!currentUser.mustChangePassword && !currentUser.hasCompletedTour && (
+        <OnboardingTour
+          isOpen={!currentUser.hasCompletedTour}
+          onClose={handleTourCompleted}
+        />
+      )}
     </div>
   );
 }

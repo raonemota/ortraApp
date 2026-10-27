@@ -4,219 +4,173 @@
  */
 
 import React, { useState } from 'react';
-import {
-  Lock,
-  Mail,
-  ShieldCheck,
-  Eye,
-  EyeOff,
-  AlertCircle,
-  CheckCircle,
-  Users,
-  ArrowRight,
-} from 'lucide-react';
-import { UserProfile } from '../types/index.ts';
-import { clinicalStorage } from '../services/storageService.ts';
+import { LogIn, Lock, Mail, AlertCircle, Loader2 } from 'lucide-react';
+import { supabase } from '../services/supabaseClient';
+import { UserProfile } from '../types/index';
 
 interface LoginViewProps {
-  onLoginSuccess: (user: UserProfile) => void;
+  onLoginSuccess: (profile: UserProfile) => void;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
-  const [email, setEmail] = useState('admin@ortra.com.br');
-  const [password, setPassword] = useState('admin123');
-  const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
     setErrorMessage(null);
 
-    const result = clinicalStorage.login(email, password);
-    if (result.success && result.user) {
-      onLoginSuccess(result.user);
-    } else {
-      setErrorMessage(result.message || 'Falha na autenticação. Verifique e-mail e senha.');
-    }
-  };
+    try {
+      // 1. Autenticar no Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-  const handleQuickLogin = (quickEmail: string, quickPass: string) => {
-    setEmail(quickEmail);
-    setPassword(quickPass);
-    const result = clinicalStorage.login(quickEmail, quickPass);
-    if (result.success && result.user) {
-      onLoginSuccess(result.user);
+      if (authError) {
+        throw new Error(
+          authError.message === 'Invalid login credentials'
+            ? 'Credenciais inválidas. Verifique o e-mail e a palavra-passe.'
+            : authError.message
+        );
+      }
+
+      if (!authData.user) {
+        throw new Error('Utilizador não encontrado.');
+      }
+
+      // 2. Procurar perfil correspondente na tabela profiles
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authData.user.id)
+        .single();
+
+      if (profileError || !profileData) {
+        throw new Error(
+          'Perfil de utilizador não encontrado no sistema. Contacte o administrador.'
+        );
+      }
+
+      if (!profileData.active) {
+        await supabase.auth.signOut();
+        throw new Error('Esta conta está inativa. Contacte a administração.');
+      }
+
+      // 3. Mapear para o tipo UserProfile da aplicação
+      const mappedProfile: UserProfile = {
+        id: profileData.id,
+        email: profileData.email,
+        fullName: profileData.full_name,
+        role: profileData.role,
+        isAdmin: profileData.role === 'admin',
+        phone: profileData.phone || '',
+        crefito: profileData.crefito || '',
+        commissionRate: profileData.default_session_rate || 0,
+        hasCompletedTour: profileData.has_completed_tour,
+        mustChangePassword: profileData.must_change_password,
+        active: profileData.active,
+        createdAt: profileData.created_at,
+      };
+
+      onLoginSuccess(mappedProfile);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Ocorreu um erro ao tentar iniciar sessão.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col justify-center items-center px-4 py-8 relative overflow-hidden">
-      {/* Background Subtle Ambience */}
-      <div className="absolute -top-32 -left-32 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-
-      {/* Login Card */}
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden relative z-10">
-        {/* Brand Banner Header */}
-        <div className="bg-slate-950 p-6 text-center border-b border-slate-800">
-          <div className="flex justify-center mb-3">
+    <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center px-4 py-8 sm:px-6 lg:px-8">
+      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-xl p-6 sm:p-8 space-y-6">
+        <div className="text-center space-y-2">
+          <div className="flex justify-center mb-4">
             <img
-              src="/assets/LogoClinicaOrtra.png"
+              src="/assets/logo-ortra.png"
               alt="Clínica Ortra"
-              className="h-10 sm:h-12 w-auto object-contain max-w-[200px]"
+              className="h-16 w-auto object-contain"
               onError={(e) => {
-                // Fallback to text if missing
+                // Fallback para caso o proxy da imagem ainda não esteja configurado
                 (e.target as HTMLElement).style.display = 'none';
               }}
             />
           </div>
-          <p className="text-xs text-slate-300 font-medium">
-            Sistema de Prontuário Eletrônico & Gestão Fisioterapêutica
+          <h2 className="text-2xl font-bold tracking-tight text-white">
+            Portal da Fisioterapia
+          </h2>
+          <p className="text-sm text-slate-400">
+            Aceda com as suas credenciais institucionais
           </p>
-          <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-teal-950 text-teal-300 border border-teal-800/80 text-[10px] font-semibold">
-            <ShieldCheck className="h-3 w-3 text-teal-400" />
-            <span>Acesso Seguro · COFFITO & LGPD</span>
-          </div>
         </div>
 
-        {/* Form Body */}
-        <div className="p-6 space-y-5">
-          {errorMessage && (
-            <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 flex items-start gap-2 text-xs text-rose-800">
-              <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
+        {errorMessage && (
+          <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-start gap-2.5 text-sm text-rose-400">
+            <AlertCircle className="w-5 h-5 shrink-0 text-rose-400 mt-0.5" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label htmlFor="login-email" className="block text-xs font-bold text-slate-700 mb-1">
-                E-mail Institucional
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                <input
-                  id="login-email"
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="usuario@ortra.com.br"
-                  className="w-full rounded-lg border border-slate-300 pl-9 pr-3 py-2 text-xs text-slate-900 bg-white focus:border-teal-600 focus:ring-1 focus:ring-teal-600"
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label htmlFor="login-password" className="block text-xs font-bold text-slate-700">
-                  Senha
-                </label>
-                <span className="text-[10px] text-slate-400">Padrão demo: admin123 / ortra123</span>
-              </div>
-              <div className="relative">
-                <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                <input
-                  id="login-password"
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full rounded-lg border border-slate-300 pl-9 pr-9 py-2 text-xs text-slate-900 bg-white focus:border-teal-600 focus:ring-1 focus:ring-teal-600"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  aria-label={showPassword ? 'Ocultar senha' : 'Exibir senha'}
-                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-600 focus:ring-offset-1"
-            >
-              <span>Entrar no Sistema</span>
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          </form>
-
-          {/* Quick Demo Credentials Panel */}
-          <div className="pt-4 border-t border-slate-100">
-            <span className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2 text-center">
-              Acesso Rápido por Perfil (Demo)
-            </span>
-            <div className="space-y-1.5">
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('admin@ortra.com.br', 'admin123')}
-                className="w-full flex items-center justify-between p-2 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-left transition-colors"
-              >
-                <div>
-                  <span className="block text-xs font-bold text-slate-800">
-                    Administrador Geral
-                  </span>
-                  <span className="text-[10px] text-slate-500">
-                    admin@ortra.com.br · Acesso irrestrito
-                  </span>
-                </div>
-                <span className="text-[10px] font-bold text-amber-700 bg-amber-100/70 px-1.5 py-0.5 rounded border border-amber-200">
-                  Admin
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('camila.santos@ortra.com.br', 'ortra123')}
-                className="w-full flex items-center justify-between p-2 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-left transition-colors"
-              >
-                <div>
-                  <span className="block text-xs font-bold text-slate-800">
-                    Dra. Camila Santos
-                  </span>
-                  <span className="text-[10px] text-slate-500">
-                    camila.santos@ortra.com.br · Fisio & Administradora
-                  </span>
-                </div>
-                <div className="flex gap-1">
-                  <span className="text-[9px] font-bold text-teal-700 bg-teal-100/70 px-1.5 py-0.5 rounded border border-teal-200">
-                    Fisio
-                  </span>
-                  <span className="text-[9px] font-bold text-amber-700 bg-amber-100/70 px-1.5 py-0.5 rounded border border-amber-200">
-                    Admin
-                  </span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('marcelo.carvalho@ortra.com.br', 'ortra123')}
-                className="w-full flex items-center justify-between p-2 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-left transition-colors"
-              >
-                <div>
-                  <span className="block text-xs font-bold text-slate-800">
-                    Dr. Marcelo Carvalho
-                  </span>
-                  <span className="text-[10px] text-slate-500">
-                    marcelo.carvalho@ortra.com.br · Fisioterapeuta Clínico
-                  </span>
-                </div>
-                <span className="text-[10px] font-bold text-teal-700 bg-teal-100/70 px-1.5 py-0.5 rounded border border-teal-200">
-                  Fisio
-                </span>
-              </button>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+              E-mail Profissional
+            </label>
+            <div className="relative">
+              <Mail className="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="nome@clinicaortra.com.br"
+                className="w-full pl-11 pr-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
+              />
             </div>
           </div>
-        </div>
 
-        {/* Card Footer */}
-        <div className="bg-slate-50 px-6 py-3 border-t border-slate-100 text-center">
-          <p className="text-[10px] text-slate-400 font-medium">
-            Clínica Ortra de Ortopedia e Fisioterapia · Lauro de Freitas - BA
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+              Palavra-passe
+            </label>
+            <div className="relative">
+              <Lock className="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full pl-11 pr-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-3 px-4 bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white font-medium rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-teal-950 text-sm mt-2"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                A autenticar...
+              </>
+            ) : (
+              <>
+                <LogIn className="w-4 h-4" />
+                Entrar no Sistema
+              </>
+            )}
+          </button>
+        </form>
+
+        <div className="text-center pt-2 border-t border-slate-800">
+          <p className="text-xs text-slate-500">
+            Clínica Ortra • Gestão e Prontuário Cinético-Funcional
           </p>
         </div>
       </div>
