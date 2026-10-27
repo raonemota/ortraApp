@@ -1,0 +1,6 @@
+{
+  "summary":  "Plano de implementação completo para o sistema da Clínica Ortra abrangendo:\n1. Autenticação com Login/Logoff dedicado e credenciais padrão de Administrador\n2. Controle de acesso baseado em papéis (RBAC): Admin Geral, Fisioterapeuta e Fisioterapeuta-Admin\n3. Cadastro de fisioterapeutas com gênero (M/F) para derivação automática de prefixo (Dr./Dra.) e inicial real no avatar\n4. Atualização para o novo logotipo LogoClinicaOrtra.png armazenado localmente\n5. Submenu da Área Administrativa em linha única com scroll horizontal suave\n6. Padronização geométrica e espaçamento vertical nos botões de ações da tabela de profissionais\n7. Correção responsiva do seletor de status no filtro financeiro mobile.",
+  "updatedAt":  "2026-10-27T14:18:50.633333769Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

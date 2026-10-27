@@ -1,0 +1,6 @@
+{
+  "name": "Clínica Ortra - Prontuário e Gestão Fisioterapia",
+  "description": "Sistema de gestão clínica, prontuário eletrônico cinético-funcional, evolução diária e controle financeiro para fisioterapeutas da Clínica Ortra.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
