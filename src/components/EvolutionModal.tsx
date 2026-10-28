@@ -9,7 +9,6 @@ import {
   Activity,
   Calendar,
   Clock,
-  DollarSign,
   CheckCircle,
   AlertCircle,
   FileText,
@@ -22,7 +21,6 @@ import {
   AttendanceStatus,
   PaymentStatus,
 } from '../types/index.ts';
-import { EvaSlider } from './EvaSlider.tsx';
 import { clinicalStorage, generateUUID, ensureUUID } from '../services/storageService.ts';
 
 interface EvolutionModalProps {
@@ -56,23 +54,8 @@ export const EvolutionModal: React.FC<EvolutionModalProps> = ({
   const [description, setDescription] = useState(
     existingEvolution?.description || ''
   );
-  const [evaBefore, setEvaBefore] = useState(
-    existingEvolution?.evaBefore ?? 5
-  );
-  const [evaAfter, setEvaAfter] = useState(
-    existingEvolution?.evaAfter ?? 3
-  );
   const [attendanceStatus, setAttendanceStatus] = useState<AttendanceStatus>(
     existingEvolution?.attendanceStatus || 'completed'
-  );
-  const [sessionValue, setSessionValue] = useState<number>(
-    existingEvolution?.sessionValue ?? (patient.defaultSessionValue || 160)
-  );
-  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>(
-    existingEvolution?.paymentStatus || 'paid'
-  );
-  const [paymentMethod, setPaymentMethod] = useState(
-    existingEvolution?.paymentMethod || 'Pix'
   );
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -97,12 +80,12 @@ export const EvolutionModal: React.FC<EvolutionModalProps> = ({
         ? existingEvolution.sessionNumber
         : nextSessionNumber,
       description: description.trim() || 'Falta registrada.',
-      evaBefore,
-      evaAfter,
+      evaBefore: 0,
+      evaAfter: 0,
       attendanceStatus,
-      sessionValue: attendanceStatus === 'completed' ? Number(sessionValue) : 0,
-      paymentStatus: attendanceStatus === 'completed' ? paymentStatus : 'paid',
-      paymentMethod,
+      sessionValue: Number(patient.defaultSessionValue || 160),
+      paymentStatus: 'paid',
+      paymentMethod: 'Particular',
       createdAt: existingEvolution ? existingEvolution.createdAt : new Date().toISOString(),
     };
 
@@ -198,25 +181,6 @@ export const EvolutionModal: React.FC<EvolutionModalProps> = ({
             </div>
           </div>
 
-          {/* EVA Before & After Session */}
-          {attendanceStatus === 'completed' && (
-            <div className="space-y-3">
-              <EvaSlider
-                value={evaBefore}
-                onChange={setEvaBefore}
-                label="1. Nível de Dor ao Iniciar a Sessão (EVA Entrada)"
-                id="eva-before-slider"
-              />
-
-              <EvaSlider
-                value={evaAfter}
-                onChange={setEvaAfter}
-                label="2. Nível de Dor ao Finalizar a Sessão (EVA Saída)"
-                id="eva-after-slider"
-              />
-            </div>
-          )}
-
           {/* Condutas e Descrição */}
           <div>
             <label htmlFor="evolution-desc" className="block text-xs font-semibold text-slate-700 mb-1">
@@ -226,78 +190,18 @@ export const EvolutionModal: React.FC<EvolutionModalProps> = ({
             </label>
             <textarea
               id="evolution-desc"
-              rows={4}
+              rows={5}
               required={attendanceStatus === 'completed'}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={
                 attendanceStatus === 'completed'
-                  ? 'Descreva as técnicas aplicadas (cinesioterapia, terapia manual, eletroterapia, carga utilizada, tolerância e orientações para casa)...'
+                  ? 'Descreva as técnicas aplicadas (cinesioterapia, terapia manual, eletroterapia, carga utilizada, resposta clínica e orientações para casa)...'
                   : 'Ex: Paciente comunicou com 24h de antecedência por viagem de trabalho.'
               }
-              className="w-full rounded-lg border border-slate-300 p-3 text-sm text-slate-900 focus:border-teal-600 focus:ring-1"
+              className="w-full rounded-lg border border-slate-300 p-3 text-xs sm:text-sm text-slate-900 focus:border-teal-600 focus:ring-1"
             />
           </div>
-
-          {/* Dados Financeiros da Sessão (RF10) */}
-          {attendanceStatus === 'completed' && (
-            <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-3">
-              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                <DollarSign className="h-4 w-4 text-teal-700" />
-                <span>Controle Financeiro da Sessão</span>
-              </h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label htmlFor="session-val-input" className="block text-xs font-medium text-slate-700 mb-1">
-                    Valor Cobrado (R$)
-                  </label>
-                  <input
-                    id="session-val-input"
-                    type="number"
-                    min={0}
-                    step={5}
-                    value={sessionValue}
-                    onChange={(e) => setSessionValue(Number(e.target.value))}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="payment-status-select" className="block text-xs font-medium text-slate-700 mb-1">
-                    Status do Pagamento
-                  </label>
-                  <select
-                    id="payment-status-select"
-                    value={paymentStatus}
-                    onChange={(e) => setPaymentStatus(e.target.value as PaymentStatus)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900"
-                  >
-                    <option value="paid">Pago</option>
-                    <option value="pending">Pendente a Receber</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label htmlFor="payment-method-select" className="block text-xs font-medium text-slate-700 mb-1">
-                    Forma de Pagamento
-                  </label>
-                  <select
-                    id="payment-method-select"
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900"
-                  >
-                    <option value="Pix">Pix</option>
-                    <option value="Dinheiro">Dinheiro</option>
-                    <option value="Cartão de Débito">Cartão de Débito</option>
-                    <option value="Cartão de Crédito">Cartão de Crédito</option>
-                    <option value="Faturamento Convênio">Faturamento Convênio</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
 
           <div className="bg-slate-50 border-t border-slate-200 -mx-3 -mb-3 p-3 flex items-center justify-end gap-3 mt-4">
             <button

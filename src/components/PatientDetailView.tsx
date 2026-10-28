@@ -22,6 +22,9 @@ import {
   CheckCircle,
   Clock,
   Sparkles,
+  Edit2,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import {
   Patient,
@@ -69,6 +72,7 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
   const [expandedAssessmentId, setExpandedAssessmentId] = useState<string | null>(
     assessments[0]?.id || null
   );
+  const [showSessionValue, setShowSessionValue] = useState(false);
 
   const age = calculateAge(patient.birthDate);
   const assignedPhysio = physioList.find((p) => p.id === patient.physioId);
@@ -88,74 +92,95 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
   // Clean phone digits for WhatsApp
   const cleanPhone = patient.phone.replace(/\D/g, '');
 
+  const emergencyDisplayText = [
+    patient.emergencyContact?.name,
+    patient.emergencyContact?.relationship ? `(${patient.emergencyContact.relationship})` : null,
+    patient.emergencyContact?.phone ? `- ${patient.emergencyContact.phone}` : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <div className="space-y-6">
-      {/* Top Navigation */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 sm:space-y-6">
+      {/* Top Navigation: botões com ícones e mesmo tamanho em grid mobile balanceado */}
+      <div className="grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center sm:justify-between gap-2 sm:gap-2.5">
         <button
           type="button"
           onClick={onBack}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs"
+          className="flex items-center justify-center gap-1.5 h-11 sm:h-10 px-3 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-400 transition-all shadow-2xs w-full sm:w-auto"
         >
-          <ArrowLeft className="h-4 w-4" />
-          <span>Voltar à Lista de Pacientes</span>
+          <ArrowLeft className="h-4 w-4 shrink-0 text-slate-500" />
+          <span className="truncate">Voltar à Lista</span>
         </button>
 
-        <div className="flex items-center gap-2">
+        <div className="contents sm:flex sm:items-center sm:gap-2">
           <button
             type="button"
             onClick={onEditPatient}
-            className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+            className="flex items-center justify-center gap-1.5 h-11 sm:h-10 px-3 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-400 transition-all shadow-2xs w-full sm:w-auto"
           >
-            Editar Cadastro
+            <Edit2 className="h-4 w-4 shrink-0 text-slate-500" />
+            <span className="truncate">Editar Cadastro</span>
           </button>
           <button
             type="button"
             onClick={onNewEvolution}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 transition-colors shadow-sm"
+            className="flex items-center justify-center gap-1.5 h-11 sm:h-10 px-3.5 rounded-xl text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 transition-all shadow-sm w-full sm:w-auto"
           >
-            <Activity className="h-4 w-4 text-emerald-400" />
-            <span>Registrar Evolução de Sessão</span>
+            <Activity className="h-4 w-4 shrink-0 text-teal-400" />
+            <span className="truncate">Nova Evolução</span>
           </button>
           <button
             type="button"
             onClick={onNewAssessment}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 transition-colors shadow-sm"
+            className="flex items-center justify-center gap-1.5 h-11 sm:h-10 px-3.5 rounded-xl text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 transition-all shadow-sm w-full sm:w-auto"
           >
-            <Plus className="h-4 w-4" />
-            <span>Nova Avaliação</span>
+            <Plus className="h-4 w-4 shrink-0 text-white" />
+            <span className="truncate">Nova Avaliação</span>
           </button>
         </div>
       </div>
 
       {/* Patient Profile Card Header */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-xs space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-teal-50 border border-teal-200 text-teal-800 font-black text-xl uppercase">
+          <div className="flex items-start gap-3.5 sm:gap-4">
+            <div className="flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-2xl bg-teal-50 border border-teal-200 text-teal-800 font-black text-lg sm:text-xl uppercase">
               {getPersonInitials(patient.fullName)}
             </div>
             <div>
-              <div className="flex flex-wrap items-center gap-2.5">
-                <h1 className="text-xl font-bold text-slate-900">{patient.fullName}</h1>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-lg sm:text-xl font-bold text-slate-900">{patient.fullName}</h1>
                 <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-teal-50 text-teal-800 border border-teal-200">
                   {patient.healthInsurance}
                 </span>
+
+                {/* Valor por Sessão discreto com botão de ver e ocultar */}
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-xs text-slate-600">
+                  <CreditCard className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                  <span className="text-[11px] text-slate-500">Sessão:</span>
+                  <span className="font-bold text-slate-800 text-[11px]">
+                    {showSessionValue ? formatCurrencyBRL(patient.defaultSessionValue || 160) : 'R$ •••••'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowSessionValue(!showSessionValue)}
+                    title={showSessionValue ? 'Ocultar valor da sessão' : 'Exibir valor da sessão'}
+                    className="p-0.5 rounded text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors"
+                    aria-label={showSessionValue ? 'Ocultar valor' : 'Ver valor'}
+                  >
+                    {showSessionValue ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">
+
+              <p className="text-xs text-slate-500 mt-1">
                 CPF: <strong className="text-slate-700">{patient.cpf}</strong> · {age} anos (Nasc: {new Date(patient.birthDate + 'T00:00:00').toLocaleDateString('pt-BR')}) · {patient.profession || 'Ocupação não informada'}
               </p>
               <p className="text-xs text-slate-500 mt-0.5">
                 Fisioterapeuta Responsável: <strong className="text-slate-800">{assignedPhysio ? formatPhysioDisplayName(assignedPhysio) : 'Clínica Ortra'}</strong> ({assignedPhysio?.crefito || 'CREFITO-7'})
               </p>
             </div>
-          </div>
-
-          <div className="text-right space-y-1">
-            <span className="text-xs text-slate-400 block">Valor por Sessão:</span>
-            <span className="text-lg font-black text-slate-900">
-              {formatCurrencyBRL(patient.defaultSessionValue || 160)}
-            </span>
           </div>
         </div>
 
@@ -180,9 +205,7 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
             <ShieldCheck className="h-4 w-4 text-rose-500 shrink-0" />
             <span>
               Emergência:{' '}
-              <strong>
-                {patient.emergencyContact?.name} ({patient.emergencyContact?.relationship}) - {patient.emergencyContact?.phone}
-              </strong>
+              <strong>{emergencyDisplayText || 'Não informado'}</strong>
             </span>
           </div>
         </div>
@@ -221,13 +244,13 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
       {activeSubTab === 'evolutions' && (
         <div className="space-y-4">
           {evolutions.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-300 p-10 text-center bg-white">
+            <div className="rounded-2xl border border-dashed border-slate-300 p-8 sm:p-10 text-center bg-white">
               <Activity className="h-8 w-8 text-slate-300 mx-auto mb-2" />
               <h3 className="text-sm font-bold text-slate-800">
                 Nenhuma evolução registrada para este paciente
               </h3>
               <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                Registre o atendimento diário com a conduta realizada, comparativo de dor EVA pré/pós e valor da sessão.
+                Registre o atendimento diário com as condutas fisioterapêuticas realizadas e evolução clínica do paciente.
               </p>
               <button
                 type="button"
@@ -240,9 +263,6 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
           ) : (
             <div className="space-y-3">
               {evolutions.map((evo) => {
-                const evaBeforeInfo = getEvaColorInfo(evo.evaBefore);
-                const evaAfterInfo = getEvaColorInfo(evo.evaAfter);
-                const isPaid = evo.paymentStatus === 'paid';
 
                 return (
                   <div

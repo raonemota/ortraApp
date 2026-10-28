@@ -289,15 +289,6 @@ export const Header: React.FC<HeaderProps> = ({
               <span>Administrativo</span>
             </button>
           )}
-
-          <button
-            type="button"
-            onClick={onLogout}
-            className="flex items-center gap-1 px-2 py-1 rounded-md font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 transition-colors"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-            <span>Sair</span>
-          </button>
         </div>
       </div>
     </header>

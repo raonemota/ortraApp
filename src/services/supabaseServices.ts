@@ -1,5 +1,5 @@
-import { supabase } from './supabaseClient';
-import { Patient, Assessment, Evolution, UserProfile } from '../types/index';
+import { supabase } from './supabaseClient.ts';
+import { Patient, Assessment, Evolution, UserProfile } from '../types/index.ts';
 
 export const supabaseService = {
   // ===============================
@@ -13,37 +13,44 @@ export const supabaseService = {
 
     if (error) throw error;
 
-    return (data || []).map((p) => ({
+    return (data || []).map((p: any) => ({
       id: p.id,
-      fullName: p.full_name,
-      cpf: p.cpf,
-      birthDate: p.birth_date,
-      phone: p.phone,
-      emergencyContact: p.emergency_contact,
-      emergencyContactName: p.emergency_contact_name,
-      profession: p.profession,
-      attendanceType: p.attendance_type,
-      insuranceName: p.insurance_name,
-      insuranceCardNumber: p.insurance_card_number,
-      addressCity: p.address_city,
-      addressState: p.address_state,
-      notes: p.notes,
-      createdAt: p.created_at,
+      physioId: p.physio_id || '',
+      fullName: p.full_name || '',
+      cpf: p.cpf || '',
+      birthDate: p.birth_date || '',
+      phone: p.phone || '',
+      healthInsurance: p.health_insurance || p.insurance_name || 'Particular',
+      emergencyContact: typeof p.emergency_contact === 'string'
+        ? {
+            name: p.emergency_contact_name || '',
+            phone: p.emergency_contact,
+            relationship: '',
+          }
+        : (p.emergency_contact || { name: '', phone: '', relationship: '' }),
+      profession: p.profession || '',
+      defaultSessionValue: Number(p.default_session_value ?? 160),
+      notes: p.notes || '',
+      createdAt: p.created_at || new Date().toISOString(),
     }));
   },
 
-  async savePatient(patient: Partial<Patient>): Promise<Patient> {
+  async savePatient(patient: Partial<Patient> & Record<string, any>): Promise<any> {
     const payload = {
+      physio_id: patient.physioId,
       full_name: patient.fullName,
       cpf: patient.cpf,
       birth_date: patient.birthDate,
       phone: patient.phone,
-      emergency_contact: patient.emergencyContact,
-      emergency_contact_name: patient.emergencyContactName,
+      emergency_contact: typeof patient.emergencyContact === 'object'
+        ? patient.emergencyContact?.phone || ''
+        : (patient.emergencyContact || ''),
+      emergency_contact_name: typeof patient.emergencyContact === 'object'
+        ? patient.emergencyContact?.name || ''
+        : (patient.emergencyContactName || ''),
       profession: patient.profession,
-      attendance_type: patient.attendanceType || 'particular',
-      insurance_name: patient.insuranceName,
-      insurance_card_number: patient.insuranceCardNumber,
+      health_insurance: patient.healthInsurance || patient.insuranceName || 'Particular',
+      default_session_value: patient.defaultSessionValue || 160,
       notes: patient.notes,
     };
 
