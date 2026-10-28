@@ -20,6 +20,9 @@ import {
   Image as ImageIcon,
   Check,
   X,
+  UploadCloud,
+  Loader2,
+  Copy,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -28,7 +31,8 @@ import {
   ClinicSettings,
   Patient,
 } from '../types/index.ts';
-import { clinicalStorage } from '../services/storageService.ts';
+import { clinicalStorage, generateUUID } from '../services/storageService.ts';
+import { supabase } from '../services/supabaseClient.ts';
 import {
   formatCurrencyBRL,
   formatPhysioDisplayName,
@@ -62,8 +66,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [physioIsAdmin, setPhysioIsAdmin] = useState(false);
   const [physioEmail, setPhysioEmail] = useState('');
   const [physioPhone, setPhysioPhone] = useState('');
-  const [physioCrefito, setPhysioCrefito] = useState('');
+  const [physioCrefito, setPhysioCrefito] = useState('CREFITO-');
   const [physioCommission, setPhysioCommission] = useState(60);
+  const [isSavingPhysio, setIsSavingPhysio] = useState(false);
+  const [physioError, setPhysioError] = useState<string | null>(null);
+  const [physioSqlFix, setPhysioSqlFix] = useState<string | null>(null);
+  const [copiedSql, setCopiedSql] = useState(false);
   const [tempPasswordNotice, setTempPasswordNotice] = useState<{
     email: string;
     tempPass: string;
@@ -86,6 +94,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [planName, setPlanName] = useState('');
   const [planValue, setPlanValue] = useState(120);
   const [planLogoUrl, setPlanLogoUrl] = useState('');
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
   // Settings
   const [settings, setSettings] = useState<ClinicSettings>(() =>
@@ -96,52 +105,73 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Audit Logs
   const auditLogs: AuditLog[] = clinicalStorage.getAuditLogs();
 
-  // Create new physio
-  const handleCreatePhysio = (e: React.FormEvent) => {
+  // Create new physio directly via Supabase database
+  const handleCreatePhysio = async (e: React.FormEvent) => {
     e.preventDefault();
+    setPhysioError(null);
+    setPhysioSqlFix(null);
     const cleanName = getCleanPersonName(physioName);
     if (!cleanName || !physioEmail.trim() || !physioCrefito.trim()) {
       return;
     }
 
-    const tempPassword = `Ortra@${Math.floor(100000 + Math.random() * 900000)}`;
-    const newProfile: UserProfile = {
-      id: `user_physio_${Date.now()}`,
-      fullName: cleanName,
-      gender: physioGender,
-      isAdmin: physioIsAdmin,
-      password: tempPassword,
-      email: physioEmail.trim(),
-      phone: physioPhone.trim(),
-      crefito: physioCrefito.trim(),
-      role: 'physio',
-      commissionRate: Number(physioCommission) || 60,
-      mustChangePassword: true,
-      hasCompletedTour: false,
-      active: true,
-      createdAt: new Date().toISOString(),
-    };
+    setIsSavingPhysio(true);
+    try {
+      const tempPassword = `Ortra@${Math.floor(100000 + Math.random() * 900000)}`;
+      const newProfile: UserProfile = {
+        id: generateUUID(),
+        fullName: cleanName,
+        gender: physioGender,
+        isAdmin: physioIsAdmin,
+        password: tempPassword,
+        email: physioEmail.trim().toLowerCase(),
+        phone: physioPhone.trim(),
+        crefito: physioCrefito.trim(),
+        role: 'physio',
+        commissionRate: Number(physioCommission) || 60,
+        mustChangePassword: true,
+        hasCompletedTour: false,
+        active: true,
+        createdAt: new Date().toISOString(),
+      };
 
-    clinicalStorage.saveProfile(newProfile);
-    clinicalStorage.logAudit(
-      'CADASTRO_FISIOTERAPEUTA',
-      `Fisioterapeuta cadastrado: ${formatPhysioDisplayName(newProfile)} (${newProfile.crefito}) - Admin: ${physioIsAdmin ? 'Sim' : 'Não'}. Gerada senha provisória.`
-    );
+      const res = await clinicalStorage.saveProfile(newProfile);
+      if (!res.success) {
+        if (res.sqlFix) {
+          setPhysioSqlFix(res.sqlFix);
+          setPhysioError(res.error || 'A tabela profiles possui restrição de chave estrangeira.');
+          onProfilesUpdated();
+        } else {
+          setPhysioError(`Erro ao salvar fisioterapeuta no Supabase: ${res.error || 'Falha de gravação'}`);
+        }
+        setIsSavingPhysio(false);
+        return;
+      }
 
-    setTempPasswordNotice({
-      email: newProfile.email,
-      tempPass: tempPassword,
-    });
+      clinicalStorage.logAudit(
+        'CADASTRO_FISIOTERAPEUTA',
+        `Fisioterapeuta cadastrado na base Supabase: ${formatPhysioDisplayName(newProfile)} (${newProfile.crefito}) - Admin: ${physioIsAdmin ? 'Sim' : 'Não'}. Gerada senha provisória.`
+      );
 
-    setPhysioName('');
-    setPhysioGender('M');
-    setPhysioIsAdmin(false);
-    setPhysioEmail('');
-    setPhysioPhone('');
-    setPhysioCrefito('');
-    setPhysioCommission(60);
-    setIsAddingPhysio(false);
-    onProfilesUpdated();
+      setTempPasswordNotice({
+        email: newProfile.email,
+        tempPass: tempPassword,
+      });
+
+      setPhysioName('');
+      setPhysioGender('M');
+      setPhysioIsAdmin(false);
+      setPhysioEmail('');
+      setPhysioPhone('');
+      setPhysioCrefito('CREFITO-');
+      setPhysioCommission(60);
+      setIsAddingPhysio(false);
+      onProfilesUpdated();
+    } catch (err: any) {
+      setPhysioError(`Falha inesperada: ${err?.message || 'Erro de rede'}`);
+    } finally {
+      setIsSavingPhysio(false);
+    }
   };
 
   // Toggle active status
@@ -189,6 +219,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     onPatientsUpdated();
     setTransferMessage(`Sucesso! ${count} pacientes foram transferidos com integridade de prontuário.`);
     setTimeout(() => setTransferMessage(null), 5000);
+  };
+
+  // Upload logo to Supabase configs bucket
+  const handleUploadPlanLogo = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingLogo(true);
+    try {
+      const sanitizedName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const storagePath = `convenios/${Date.now()}_${sanitizedName}`;
+
+      const { error } = await supabase.storage
+        .from('configs')
+        .upload(storagePath, file, { upsert: true });
+
+      if (error) {
+        console.warn('Erro ao enviar imagem para o bucket configs:', error.message);
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from('configs')
+        .getPublicUrl(storagePath);
+
+      if (publicUrlData?.publicUrl) {
+        setPlanLogoUrl(publicUrlData.publicUrl);
+      }
+    } catch (err: any) {
+      console.error('Falha no upload do logo:', err);
+    } finally {
+      setIsUploadingLogo(false);
+      e.target.value = '';
+    }
   };
 
   // Open Edit Plan
@@ -375,12 +437,61 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </h3>
                 <button
                   type="button"
-                  onClick={() => setIsAddingPhysio(false)}
+                  onClick={() => {
+                    setIsAddingPhysio(false);
+                    setPhysioCrefito('CREFITO-');
+                    setPhysioError(null);
+                  }}
                   className="text-xs font-semibold text-slate-500 hover:text-slate-800"
                 >
                   Cancelar
                 </button>
               </div>
+
+              {physioError && (
+                <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950 space-y-2.5">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="font-bold">{physioError}</p>
+                      {physioSqlFix && (
+                        <p className="text-[11px] text-amber-800 leading-relaxed">
+                          Para liberar o cadastro de profissionais diretamente pelo Administrador na base do Supabase, execute o comando abaixo no <strong>SQL Editor</strong> do seu painel Supabase:
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {physioSqlFix && (
+                    <div className="bg-slate-900 rounded-lg p-2.5 flex items-center justify-between gap-2 overflow-x-auto shadow-inner">
+                      <code className="text-teal-300 font-mono text-[11px] select-all">
+                        {physioSqlFix}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(physioSqlFix);
+                          setCopiedSql(true);
+                          setTimeout(() => setCopiedSql(false), 2500);
+                        }}
+                        className="px-2.5 py-1 rounded bg-teal-700 hover:bg-teal-600 text-white font-sans text-[10px] font-bold flex items-center gap-1 shrink-0 transition-colors"
+                      >
+                        {copiedSql ? (
+                          <>
+                            <Check className="h-3 w-3" />
+                            <span>Copiado!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3 w-3" />
+                            <span>Copiar SQL</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <form onSubmit={handleCreatePhysio} className="space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
@@ -431,7 +542,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                   <div>
                     <label htmlFor="new-physio-crefito" className="block text-xs font-semibold text-slate-700 mb-1">
-                      CREFito *
+                      CREFITO *
                     </label>
                     <input
                       id="new-physio-crefito"
@@ -439,8 +550,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       required
                       placeholder="CREFITO-7/12345-F"
                       value={physioCrefito}
-                      onChange={(e) => setPhysioCrefito(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
+                      onChange={(e) => {
+                        let val = e.target.value;
+                        if (!val.startsWith('CREFITO-')) {
+                          const suffix = val.replace(/^C?R?E?F?I?T?O?-?/i, '');
+                          val = 'CREFITO-' + suffix;
+                        }
+                        setPhysioCrefito(val);
+                      }}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 font-medium"
                     />
                   </div>
 
@@ -475,9 +593,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div className="flex justify-end gap-2 pt-1">
                   <button
                     type="submit"
-                    className="px-4 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg shadow-sm"
+                    disabled={isSavingPhysio}
+                    className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 disabled:opacity-60 rounded-lg shadow-sm transition-colors"
                   >
-                    Salvar e Emitir Senha Provisória
+                    {isSavingPhysio && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    <span>{isSavingPhysio ? 'Gravando no Supabase...' : 'Salvar no Banco e Emitir Senha'}</span>
                   </button>
                 </div>
               </form>
@@ -812,30 +932,63 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   />
                 </div>
 
-                <div>
-                  <label htmlFor="plan-logo-input" className="block text-xs font-semibold text-slate-700 mb-1">
-                    URL do Logo do Convênio (Opcional)
+                <div className="sm:col-span-1">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Logotipo do Convênio (Upload Bucket Configs)
                   </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="file"
+                      id="plan-logo-file"
+                      accept="image/*"
+                      onChange={handleUploadPlanLogo}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="plan-logo-file"
+                      className="flex-1 cursor-pointer flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 transition-colors shadow-2xs"
+                    >
+                      {isUploadingLogo ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 text-teal-600 animate-spin" />
+                          <span>Enviando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <UploadCloud className="h-3.5 w-3.5 text-teal-700" />
+                          <span>Enviar Imagem (configs)</span>
+                        </>
+                      )}
+                    </label>
+                  </div>
                   <input
                     id="plan-logo-input"
                     type="url"
-                    placeholder="https://exemplo.com/logo.png"
+                    placeholder="Ou cole o link direto da imagem..."
                     value={planLogoUrl}
                     onChange={(e) => setPlanLogoUrl(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs"
+                    className="w-full mt-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] text-slate-700"
                   />
                 </div>
               </div>
 
               {planLogoUrl && (
-                <div className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200 w-fit">
-                  <span className="text-[11px] text-slate-500">Prévia do Logo:</span>
+                <div className="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 w-fit">
+                  <span className="text-[11px] text-slate-500 font-medium">Prévia do Logo:</span>
                   <img
                     src={planLogoUrl}
-                    alt="Logo"
-                    className="h-6 w-auto object-contain max-w-[80px]"
+                    alt="Logo Prévia"
+                    className="h-7 w-auto object-contain max-w-[100px] rounded border border-slate-100"
                     onError={(e) => ((e.target as HTMLElement).style.display = 'none')}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setPlanLogoUrl('')}
+                    className="text-slate-400 hover:text-rose-600 p-0.5"
+                    title="Remover logotipo"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                 </div>
               )}
 

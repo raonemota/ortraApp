@@ -19,6 +19,8 @@ import {
   AlertCircle,
   Save,
   ArrowLeft,
+  Loader2,
+  ExternalLink,
 } from 'lucide-react';
 import {
   Patient,
@@ -31,7 +33,8 @@ import {
 } from '../types/index.ts';
 import { EvaSlider } from './EvaSlider.tsx';
 import { getOxfordGradeDescription } from '../utils/clinicalCalculations.ts';
-import { clinicalStorage } from '../services/storageService.ts';
+import { clinicalStorage, generateUUID, ensureUUID } from '../services/storageService.ts';
+import { supabase } from '../services/supabaseClient.ts';
 
 interface NewAssessmentViewProps {
   patient: Patient;
@@ -182,21 +185,55 @@ export const NewAssessmentView: React.FC<NewAssessmentViewProps> = ({
     setOrthopedicTests(orthopedicTests.filter((_, i) => i !== idx));
   };
 
-  // File Upload Simulation
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
+
+  // File Upload to Supabase Storage Bucket 'docs'
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    const newFiles: AttachedFile[] = Array.from(files).map((f) => ({
-      id: `file_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-      name: f.name,
-      size: `${(f.size / (1024 * 1024)).toFixed(2)} MB`,
-      type: f.type || 'document',
-      date: new Date().toISOString().split('T')[0],
-    }));
-    setAttachedFiles([...attachedFiles, ...newFiles]);
+    setIsUploadingFile(true);
+
+    try {
+      const uploadedList: AttachedFile[] = [];
+
+      for (const f of Array.from(files)) {
+        const sanitized = f.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const storagePath = `paciente_${patient.id}/${Date.now()}_${sanitized}`;
+
+        // Upload to bucket 'docs'
+        const { error: uploadError } = await supabase.storage
+          .from('docs')
+          .upload(storagePath, f, { upsert: true });
+
+        if (uploadError) {
+          console.warn('Erro ao enviar documento para o bucket docs:', uploadError.message);
+        }
+
+        const { data: urlData } = supabase.storage
+          .from('docs')
+          .getPublicUrl(storagePath);
+
+        uploadedList.push({
+          id: `file_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+          name: f.name,
+          size: `${(f.size / (1024 * 1024)).toFixed(2)} MB`,
+          type: f.type || 'document',
+          date: new Date().toISOString().split('T')[0],
+          url: urlData?.publicUrl || '',
+          path: storagePath,
+        });
+      }
+
+      setAttachedFiles((prev) => [...prev, ...uploadedList]);
+    } catch (err: any) {
+      console.error('Falha no upload para o bucket docs:', err);
+    } finally {
+      setIsUploadingFile(false);
+      e.target.value = '';
+    }
   };
 
-  const handleSaveAssessment = () => {
+  const handleSaveAssessment = async () => {
     setError(null);
 
     if (!qp.trim()) {
@@ -212,9 +249,9 @@ export const NewAssessmentView: React.FC<NewAssessmentViewProps> = ({
     }
 
     const assessmentRecord: Assessment = {
-      id: existingAssessment ? existingAssessment.id : `ass_${Date.now()}`,
-      patientId: patient.id,
-      physioId: currentUser.id,
+      id: existingAssessment ? existingAssessment.id : generateUUID(),
+      patientId: ensureUUID(patient.id),
+      physioId: ensureUUID(currentUser.id),
       createdAt: existingAssessment ? existingAssessment.createdAt : new Date().toISOString(),
       anamnesis: {
         qp: qp.trim(),
@@ -250,7 +287,11 @@ export const NewAssessmentView: React.FC<NewAssessmentViewProps> = ({
       },
     };
 
-    clinicalStorage.saveAssessment(assessmentRecord);
+    const res = await clinicalStorage.saveAssessment(assessmentRecord);
+    if (!res.success) {
+      setError(`Erro ao salvar avaliação no Supabase: ${res.error || 'Falha de comunicação'}`);
+      return;
+    }
     setIsSaved(true);
     setTimeout(() => {
       onSaved(assessmentRecord);
@@ -521,12 +562,16 @@ export const NewAssessmentView: React.FC<NewAssessmentViewProps> = ({
                   htmlFor="exam-file-upload"
                   className="cursor-pointer flex flex-col items-center justify-center gap-1.5"
                 >
-                  <UploadCloud className="h-8 w-8 text-teal-600" />
+                  {isUploadingFile ? (
+                    <Loader2 className="h-8 w-8 text-teal-600 animate-spin" />
+                  ) : (
+                    <UploadCloud className="h-8 w-8 text-teal-600" />
+                  )}
                   <span className="text-xs font-semibold text-slate-800">
-                    Anexar laudos em PDF ou imagens de exames
+                    {isUploadingFile ? 'Enviando documento para o Supabase (bucket docs)...' : 'Anexar laudos em PDF ou imagens de exames'}
                   </span>
                   <span className="text-[11px] text-slate-500">
-                    Armazenamento seguro com controle de acesso LGPD
+                    Armazenamento em nuvem seguro (Bucket docs) com conformidade LGPD
                   </span>
                 </label>
 
@@ -541,6 +586,17 @@ export const NewAssessmentView: React.FC<NewAssessmentViewProps> = ({
                           <FileCheck2 className="h-4 w-4 text-teal-600 shrink-0" />
                           <span className="truncate font-medium text-slate-800">{file.name}</span>
                           <span className="text-[10px] text-slate-400">({file.size})</span>
+                          {file.url && (
+                            <a
+                              href={file.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-teal-600 hover:text-teal-800 flex items-center gap-0.5 font-semibold text-[10px]"
+                            >
+                              <span>Abrir</span>
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
                         </div>
                         <button
                           type="button"

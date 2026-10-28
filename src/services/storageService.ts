@@ -12,6 +12,7 @@ import {
   AuditLog,
   ClinicSettings,
 } from '../types/index.ts';
+import { supabase } from './supabaseClient.ts';
 
 const STORAGE_KEYS = {
   CURRENT_USER: 'ortra_current_user',
@@ -25,10 +26,89 @@ const STORAGE_KEYS = {
   CLINIC_SETTINGS: 'ortra_clinic_settings',
 };
 
-// Default Initial Profiles
+// UUID Generation & Mapping Helpers
+export function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+const LEGACY_ID_MAP: Record<string, string> = {
+  user_admin_01: 'a0000000-0000-4000-8000-000000000001',
+  user_physio_01: 'a0000000-0000-4000-8000-000000000002',
+  user_physio_02: 'a0000000-0000-4000-8000-000000000003',
+  user_physio_03: 'a0000000-0000-4000-8000-000000000004',
+  pat_01: 'b0000000-0000-4000-8000-000000000001',
+  pat_02: 'b0000000-0000-4000-8000-000000000002',
+  pat_03: 'b0000000-0000-4000-8000-000000000003',
+  pat_04: 'b0000000-0000-4000-8000-000000000004',
+  ass_01: 'c0000000-0000-4000-8000-000000000001',
+  ass_02: 'c0000000-0000-4000-8000-000000000002',
+  evo_01: 'd0000000-0000-4000-8000-000000000001',
+  evo_02: 'd0000000-0000-4000-8000-000000000002',
+  evo_03: 'd0000000-0000-4000-8000-000000000003',
+  evo_04: 'd0000000-0000-4000-8000-000000000004',
+  evo_05: 'd0000000-0000-4000-8000-000000000005',
+  evo_06: 'd0000000-0000-4000-8000-000000000006',
+  evo_07: 'd0000000-0000-4000-8000-000000000007',
+};
+
+export function ensureUUID(id?: string | null): string {
+  if (!id) return generateUUID();
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return id.toLowerCase();
+  }
+  if (LEGACY_ID_MAP[id]) {
+    return LEGACY_ID_MAP[id];
+  }
+  return generateUUID();
+}
+
+// Purge any legacy demo patient records from previous sessions
+function purgeLegacyDemoData() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const storedPatients = localStorage.getItem(STORAGE_KEYS.PATIENTS);
+      if (storedPatients) {
+        const list = JSON.parse(storedPatients);
+        if (Array.isArray(list) && list.some((p: any) => p.id?.startsWith('pat_') || p.id?.startsWith('b0000000-'))) {
+          localStorage.removeItem(STORAGE_KEYS.PATIENTS);
+          localStorage.removeItem(STORAGE_KEYS.ASSESSMENTS);
+          localStorage.removeItem(STORAGE_KEYS.EVOLUTIONS);
+        }
+      }
+    }
+  } catch (e) {
+    // Ignore storage parse errors
+  }
+}
+purgeLegacyDemoData();
+
+// Default Initial Profiles (Aligned with Supabase database)
 export const INITIAL_PROFILES: UserProfile[] = [
   {
-    id: 'user_admin_01',
+    id: '7b47fdfc-31d0-4259-9239-0836522aace7',
+    email: 'raonemota@hotmail.com',
+    fullName: 'Raone Mota',
+    gender: 'M',
+    phone: '(71) 98606-3671',
+    role: 'admin',
+    isAdmin: true,
+    password: 'admin123',
+    crefito: 'CREFITO-7/08921-F',
+    commissionRate: 100,
+    mustChangePassword: false,
+    hasCompletedTour: true,
+    active: true,
+    createdAt: '2026-10-28T11:53:32Z',
+  },
+  {
+    id: 'a0000000-0000-4000-8000-000000000001',
     email: 'admin@ortra.com.br',
     fullName: 'Beatriz Ortra',
     gender: 'F',
@@ -44,7 +124,7 @@ export const INITIAL_PROFILES: UserProfile[] = [
     createdAt: '2024-01-10T08:00:00Z',
   },
   {
-    id: 'user_physio_01',
+    id: 'a0000000-0000-4000-8000-000000000002',
     email: 'marcelo.carvalho@ortra.com.br',
     fullName: 'Marcelo Carvalho',
     gender: 'M',
@@ -58,38 +138,6 @@ export const INITIAL_PROFILES: UserProfile[] = [
     hasCompletedTour: true,
     active: true,
     createdAt: '2024-02-15T09:30:00Z',
-  },
-  {
-    id: 'user_physio_02',
-    email: 'camila.santos@ortra.com.br',
-    fullName: 'Camila Santos',
-    gender: 'F',
-    phone: '(71) 98765-4321',
-    role: 'physio',
-    isAdmin: true, // Fisio que é também Administradora!
-    password: 'ortra123',
-    crefito: 'CREFITO-7/22341-F',
-    commissionRate: 65,
-    mustChangePassword: false,
-    hasCompletedTour: true,
-    active: true,
-    createdAt: '2024-03-01T10:00:00Z',
-  },
-  {
-    id: 'user_physio_03',
-    email: 'roberto.alencar@ortra.com.br',
-    fullName: 'Roberto Alencar (Ex-colaborador)',
-    gender: 'M',
-    phone: '(71) 99111-2233',
-    role: 'physio',
-    isAdmin: false,
-    password: 'ortra123',
-    crefito: 'CREFITO-7/11094-F',
-    commissionRate: 60,
-    mustChangePassword: true,
-    hasCompletedTour: false,
-    active: false,
-    createdAt: '2023-11-20T08:00:00Z',
   },
 ];
 
@@ -113,367 +161,11 @@ export const INITIAL_INSURANCE_PLANS: HealthInsurancePlan[] = [
   { id: 'plan_cassi', name: 'CASSI', baseSessionValue: 115, paymentTermDays: 30, active: true, logoUrl: 'https://images.unsplash.com/photo-1516549655169-df83a0774514?w=100&auto=format&fit=crop&q=80' },
 ];
 
-export const INITIAL_PATIENTS: Patient[] = [
-  {
-    id: 'pat_01',
-    physioId: 'user_physio_01',
-    fullName: 'Maria Helena Silveira',
-    cpf: '529.982.247-25',
-    birthDate: '1968-04-14',
-    phone: '(71) 99245-1289',
-    healthInsurance: 'Particular',
-    emergencyContact: {
-      name: 'Lucas Silveira (Filho)',
-      relationship: 'Filho',
-      phone: '(71) 99123-9988',
-    },
-    profession: 'Professora Aposentada',
-    defaultSessionValue: 160,
-    onboardingChecklist: {
-      consentLgpdSigned: true,
-      identificationVerified: true,
-      rulesExplained: true,
-      firstAssessmentScheduled: true,
-    },
-    createdAt: '2026-09-10T10:00:00Z',
-    notes: 'Paciente pontual, refere queixas matinais no joelho esquerdo.',
-  },
-  {
-    id: 'pat_02',
-    physioId: 'user_physio_01',
-    fullName: 'Carlos Eduardo Menezes',
-    cpf: '714.283.945-81',
-    birthDate: '1985-11-23',
-    phone: '(71) 98765-1122',
-    healthInsurance: 'Bradesco Saúde',
-    emergencyContact: {
-      name: 'Fernanda Menezes',
-      relationship: 'Esposa',
-      phone: '(71) 98765-3344',
-    },
-    profession: 'Engenheiro Civil',
-    defaultSessionValue: 125,
-    onboardingChecklist: {
-      consentLgpdSigned: true,
-      identificationVerified: true,
-      rulesExplained: true,
-      firstAssessmentScheduled: true,
-    },
-    createdAt: '2026-10-02T14:30:00Z',
-    notes: 'Lombalgia mecânico-postural irradiando para glúteo E.',
-  },
-  {
-    id: 'pat_03',
-    physioId: 'user_physio_02',
-    fullName: 'Juliana Paes Ramos',
-    cpf: '382.910.457-19',
-    birthDate: '1992-07-30',
-    phone: '(71) 99344-5566',
-    healthInsurance: 'Unimed Norte/Nordeste',
-    emergencyContact: {
-      name: 'Paulo Ramos',
-      relationship: 'Irmão',
-      phone: '(71) 99344-8899',
-    },
-    profession: 'Designer Gráfica',
-    defaultSessionValue: 110,
-    onboardingChecklist: {
-      consentLgpdSigned: true,
-      identificationVerified: true,
-      rulesExplained: true,
-      firstAssessmentScheduled: true,
-    },
-    createdAt: '2026-10-12T11:15:00Z',
-    notes: 'Tendinopatia do supraespinal no ombro direito.',
-  },
-  {
-    id: 'pat_04',
-    physioId: 'user_physio_03', // From inactive physio for transfer demo!
-    fullName: 'Antônio Carlos Barreto',
-    cpf: '192.837.465-02',
-    birthDate: '1959-02-18',
-    phone: '(71) 98877-6655',
-    healthInsurance: 'CASSI',
-    emergencyContact: {
-      name: 'Silvia Barreto',
-      relationship: 'Cônjuge',
-      phone: '(71) 98877-4433',
-    },
-    profession: 'Bancário Aposentado',
-    defaultSessionValue: 115,
-    onboardingChecklist: {
-      consentLgpdSigned: true,
-      identificationVerified: false, // Pending checklist item demo
-      rulesExplained: true,
-      firstAssessmentScheduled: false,
-    },
-    createdAt: '2026-10-20T09:00:00Z',
-    notes: 'Paciente transferível aguardando reavaliação.',
-  },
-];
-
-export const INITIAL_ASSESSMENTS: Assessment[] = [
-  {
-    id: 'ass_01',
-    patientId: 'pat_01',
-    physioId: 'user_physio_01',
-    createdAt: '2026-09-11T10:30:00Z',
-    anamnesis: {
-      qp: 'Dor e estalidos no joelho esquerdo ao descer escadas.',
-      hda: 'Paciente relata início insidioso há cerca de 6 meses, com piora progressiva nas últimas 3 semanas após caminhada prolongada. Alívio com repouso e crioterapia.',
-      hpp: 'Meniscectomia parcial prévia (2018). Hipertensa controlada com Losartana 50mg. Sem histórico de fraturas.',
-      medications: 'Losartana 50mg (1x/dia), Glucosamina + Condroitina.',
-      examNotes: 'Ressonância Magnética de Joelho E (15/08/2026): Condropatia patelar grau II-III e redução do espaço tíbio-femoral medial com osteofitose discreta.',
-      lifeHabits: {
-        physicalActivity: 'Hidroginástica 2x por semana (interrompida no último mês)',
-        sleepQuality: 'Regular, acorda esporadicamente por dor postural',
-        tobacco: false,
-        alcohol: false,
-        workPosturalDemands: 'Atividades domésticas moderadas, sobe 2 lances de escada diariamente',
-      },
-      attachedFiles: [
-        {
-          id: 'file_01',
-          name: 'Laudo_RM_Joelho_Esquerdo.pdf',
-          size: '1.4 MB',
-          type: 'application/pdf',
-          date: '2026-09-10',
-        },
-      ],
-    },
-    physicalExam: {
-      evaInitial: 7,
-      inspectionPalpation: 'Edema leve (+/4+) em região peripatelar esquerda. Crepitação audível e palpável à flexo-extensão. Tensão muscular em gastrocnêmio e tensor da fáscia lata.',
-      goniometry: [
-        { joint: 'Joelho Esquerdo', movement: 'Flexão Ativa', degrees: 110, reference: '0-135°', notes: 'Dor no final do arco' },
-        { joint: 'Joelho Esquerdo', movement: 'Extensão Ativa', degrees: -5, reference: '0°', notes: 'Déficit terminal de 5°' },
-        { joint: 'Joelho Direito (Contralateral)', movement: 'Flexão Ativa', degrees: 135, reference: '0-135°' },
-        { joint: 'Joelho Direito (Contralateral)', movement: 'Extensão Ativa', degrees: 0, reference: '0°' },
-      ],
-      muscleStrength: [
-        { muscleGroup: 'Quadríceps E (Vasto Medial)', grade: 3, notes: 'Fadiga rápida com dor infrapatelar' },
-        { muscleGroup: 'Isquiotibiais E', grade: 4, notes: 'Sem queixa álgica' },
-        { muscleGroup: 'Glúteo Médio E', grade: 3, notes: 'Trendelenburg compensatório leve' },
-        { muscleGroup: 'Tríceps Sural E', grade: 4 },
-      ],
-      orthopedicTests: [
-        { name: 'Teste de Clarke (Compressão Patelar)', region: 'Joelho E', result: 'positive', notes: 'Dor intensa e apreensão' },
-        { name: 'Teste de Lachman', region: 'Joelho E', result: 'negative', notes: 'LCA íntegro' },
-        { name: 'Teste de Gaveta Anterior', region: 'Joelho E', result: 'negative' },
-        { name: 'Teste de McMurray', region: 'Joelho E', result: 'negative', notes: 'Meniscos sem dor no momento' },
-      ],
-    },
-    diagnosisAndPlan: {
-      kineticFunctionalDiagnosis: 'Disfunção femoropatelar e gonartrose incipiente à esquerda com déficit de força em estabilizadores de pelve e quadríceps, restrição de ADM de flexão e crepitação.',
-      treatmentGoals: {
-        shortTerm: 'Alívio álgico (redução do EVA de 7 para 3), reabsorção do edema e restauração da extensão completa (0°).',
-        mediumTerm: 'Fortalecimento do vasto medial oblíquo e glúteo médio em cadeia cinética fechada e ganho de ADM de flexão para 125°.',
-        longTerm: 'Reabilitação proprioceptiva funcional, retorno seguro às atividades físicas e subida/descida de escadas sem compensações.',
-      },
-      therapeuticPlan: [
-        'Cinesioterapia Ativa e Resistida Progressiva',
-        'Terapia Manual e Liberação Miofascial Peripatelar',
-        'Eletroterapia Analgésica (TENS)',
-        'Fortalecimento de Glúteo Médio e Estabilizadores Pélvicos',
-        'Crioterapia Pós-Exercício',
-      ],
-      planDetails: 'Frequência sugerida: 2 vezes por semana, com reavaliação funcional após 10 sessões.',
-    },
-  },
-  {
-    id: 'ass_02',
-    patientId: 'pat_02',
-    physioId: 'user_physio_01',
-    createdAt: '2026-10-03T15:00:00Z',
-    anamnesis: {
-      qp: 'Dor lombar intensa em pontada ao levantar da cadeira de trabalho.',
-      hda: 'Sintomas iniciados há 2 meses após esforço em obra civil. Piora ao sentar por mais de 30 minutos e ao flexionar o tronco.',
-      hpp: 'Sedentarismo há 3 anos. Sem cirurgias prévias.',
-      medications: 'Ciclobenzaprina 5mg à noite, Cetoprofeno nos picos.',
-      examNotes: 'Tomografia de Coluna Lombossacra (Set/2026): Protrusão discal póstero-lateral esquerda em L5-S1 tocando raiz emergente.',
-      lifeHabits: {
-        physicalActivity: 'Nenhuma',
-        sleepQuality: 'Ruim devido ao desconforto postural',
-        tobacco: false,
-        alcohol: true,
-        workPosturalDemands: 'Trabalho sentado no computador por 8 a 10 horas/dia',
-      },
-      attachedFiles: [],
-    },
-    physicalExam: {
-      evaInitial: 8,
-      inspectionPalpation: 'Retificação da lordose lombar fisiológica, hipertonia acentuada da musculatura paravertebral e quadrado lombar bilateral.',
-      goniometry: [
-        { joint: 'Coluna Lombar', movement: 'Flexão Anterior', degrees: 35, reference: '0-60°', notes: 'Distância dedos-chão 32cm com dor' },
-        { joint: 'Coluna Lombar', movement: 'Extensão', degrees: 10, reference: '0-25°', notes: 'Dor no final do movimento' },
-      ],
-      muscleStrength: [
-        { muscleGroup: 'Core Abdominal (Transverso/Oblíquos)', grade: 2, notes: 'Incapacidade de sustentar ponte' },
-        { muscleGroup: 'Glúteo Máximo', grade: 3 },
-      ],
-      orthopedicTests: [
-        { name: 'Teste de Lasègue', region: 'Membro Inferior E', result: 'positive', notes: 'Positivo a 45° com irradiação' },
-        { name: 'Teste de Slump', region: 'Coluna / Neural', result: 'positive', notes: 'Dura-máter sensível' },
-      ],
-    },
-    diagnosisAndPlan: {
-      kineticFunctionalDiagnosis: 'Lombalgia mecânica com componente radicular secundária à discopatia degenerativa L5-S1, associada a fraqueza do complexo lombo-pélvico-quadril (Core) e retificação sagital.',
-      treatmentGoals: {
-        shortTerm: 'Centralização da dor e controle espasmódico dos paravertebrais (reduzir EVA 8 -> 4).',
-        mediumTerm: 'Mobilização neural suave e restauração da extensão lombar com método McKenzie.',
-        longTerm: 'Estabilização segmentar vertebral e treinamento ergonômico no ambiente de trabalho.',
-      },
-      therapeuticPlan: [
-        'Método McKenzie / Terapia Mecânica',
-        'Mobilização Neural Ativa / Passiva',
-        'Estabilização Segmentar Vertebral (Core Training)',
-        'Calor Úmido e Liberação Miofascial Instrumental',
-      ],
-      planDetails: 'Sessões 2x na semana. Orientações posturais no trabalho imediatas.',
-    },
-  },
-];
-
-export const INITIAL_EVOLUTIONS: Evolution[] = [
-  // Evolutions for Patient 1 (Maria Helena)
-  {
-    id: 'evo_01',
-    patientId: 'pat_01',
-    physioId: 'user_physio_01',
-    sessionDate: '2026-10-14T10:00:00Z',
-    sessionNumber: 1,
-    description: 'Primeira sessão pós-avaliação. Realizada termoterapia superficial + cinesioterapia passiva para ganho de flexão de joelho E. Realizado fortalecimento isométrico de quadríceps a 30° e liberação miofascial de reto femoral. Paciente tolerou bem sem intercorrências.',
-    evaBefore: 7,
-    evaAfter: 5,
-    attendanceStatus: 'completed',
-    sessionValue: 160,
-    paymentStatus: 'paid',
-    paymentMethod: 'Pix',
-    createdAt: '2026-10-14T11:00:00Z',
-  },
-  {
-    id: 'evo_02',
-    patientId: 'pat_01',
-    physioId: 'user_physio_01',
-    sessionDate: '2026-10-17T10:00:00Z',
-    sessionNumber: 2,
-    description: 'Sessão 2. Paciente relata menor rigidez matinal. Cinesioterapia ativa-assistida, bicicleta ergométrica sem carga por 10 min. Exercício de ponte com elástico para ativação de glúteo médio. Crioterapia peripatelar ao final.',
-    evaBefore: 5,
-    evaAfter: 4,
-    attendanceStatus: 'completed',
-    sessionValue: 160,
-    paymentStatus: 'paid',
-    paymentMethod: 'Pix',
-    createdAt: '2026-10-17T11:00:00Z',
-  },
-  {
-    id: 'evo_03',
-    patientId: 'pat_01',
-    physioId: 'user_physio_01',
-    sessionDate: '2026-10-21T10:00:00Z',
-    sessionNumber: 3,
-    description: 'Sessão 3. Paciente realizou subida e descida em step baixo com boa co-contração do VMO. Sem estalidos agudos. Cinesioterapia proprioceptiva em disco de equilíbrio.',
-    evaBefore: 4,
-    evaAfter: 2,
-    attendanceStatus: 'completed',
-    sessionValue: 160,
-    paymentStatus: 'paid',
-    paymentMethod: 'Dinheiro',
-    createdAt: '2026-10-21T11:00:00Z',
-  },
-  {
-    id: 'evo_04',
-    patientId: 'pat_01',
-    physioId: 'user_physio_01',
-    sessionDate: '2026-10-24T10:00:00Z',
-    sessionNumber: 4,
-    description: 'Sessão 4. Evolução positiva. Amplitude de movimento de flexão atingiu 122°. Cinesioterapia resistida com caneleira de 1kg. TENS funcional descartado no momento devido à melhora álgica.',
-    evaBefore: 3,
-    evaAfter: 1,
-    attendanceStatus: 'completed',
-    sessionValue: 160,
-    paymentStatus: 'pending', // Pending payment demo
-    createdAt: '2026-10-24T11:00:00Z',
-  },
-  // Evolutions for Patient 2 (Carlos Eduardo)
-  {
-    id: 'evo_05',
-    patientId: 'pat_02',
-    physioId: 'user_physio_01',
-    sessionDate: '2026-10-06T15:00:00Z',
-    sessionNumber: 1,
-    description: 'Sessão 1. Foco em analgesia e centralização de sintomas. TENS convencional modo contínuo em região lombar (30 min). Exercício de extensão em decúbito ventral (apoio nos cotovelos) com alívio do componente ciático.',
-    evaBefore: 8,
-    evaAfter: 6,
-    attendanceStatus: 'completed',
-    sessionValue: 125,
-    paymentStatus: 'paid',
-    paymentMethod: 'Faturamento Convênio',
-    createdAt: '2026-10-06T16:00:00Z',
-  },
-  {
-    id: 'evo_06',
-    patientId: 'pat_02',
-    physioId: 'user_physio_01',
-    sessionDate: '2026-10-10T15:00:00Z',
-    sessionNumber: 2,
-    description: 'Sessão 2. Paciente desmarcou por compromisso profissional inadiável. Reagendado sem prejuízo do plano.',
-    evaBefore: 6,
-    evaAfter: 6,
-    attendanceStatus: 'missed_justified',
-    sessionValue: 0,
-    paymentStatus: 'paid',
-    createdAt: '2026-10-10T15:15:00Z',
-  },
-  {
-    id: 'evo_07',
-    patientId: 'pat_02',
-    physioId: 'user_physio_01',
-    sessionDate: '2026-10-15T15:00:00Z',
-    sessionNumber: 3,
-    description: 'Sessão 3. Melhora nítida da mobilidade. Mobilização neural do nervo ciático (flossing) grau III. Treino respiratório diafragmático com ativação de transverso do abdome.',
-    evaBefore: 6,
-    evaAfter: 3,
-    attendanceStatus: 'completed',
-    sessionValue: 125,
-    paymentStatus: 'paid',
-    paymentMethod: 'Faturamento Convênio',
-    createdAt: '2026-10-15T16:00:00Z',
-  },
-];
-
-export const INITIAL_AUDIT_LOGS: AuditLog[] = [
-  {
-    id: 'audit_01',
-    timestamp: '2026-10-27T08:15:00Z',
-    userId: 'user_admin_01',
-    userName: 'Dra. Beatriz Ortra',
-    userRole: 'admin',
-    action: 'LOGIN_SISTEMA',
-    details: 'Acesso autenticado ao painel de gestão da clínica.',
-    ipAddress: '187.54.12.98 (Lauro de Freitas/BA)',
-  },
-  {
-    id: 'audit_02',
-    timestamp: '2026-10-27T08:30:00Z',
-    userId: 'user_physio_01',
-    userName: 'Dr. Marcelo Carvalho',
-    userRole: 'physio',
-    action: 'REGISTRO_EVOLUCAO',
-    details: 'Evolução registrada para a paciente Maria Helena Silveira (Sessão 4).',
-    ipAddress: '187.54.12.98 (Lauro de Freitas/BA)',
-  },
-  {
-    id: 'audit_03',
-    timestamp: '2026-10-27T09:00:00Z',
-    userId: 'user_admin_01',
-    userName: 'Dra. Beatriz Ortra',
-    userRole: 'admin',
-    action: 'PARAMETROS_CLINICA',
-    details: 'Revisão da tabela de repasse de comissionamento de fisioterapeutas.',
-    ipAddress: '187.54.12.98 (Lauro de Freitas/BA)',
-  },
-];
+// Completely empty demo arrays - the system strictly uses the Supabase database
+export const INITIAL_PATIENTS: Patient[] = [];
+export const INITIAL_ASSESSMENTS: Assessment[] = [];
+export const INITIAL_EVOLUTIONS: Evolution[] = [];
+export const INITIAL_AUDIT_LOGS: AuditLog[] = [];
 
 /**
  * Main persistent Storage Service
@@ -524,65 +216,396 @@ class ClinicalStorageService {
     this.set(STORAGE_KEYS.IS_AUTHENTICATED, status);
   }
 
-  login(email: string, pass: string): { success: boolean; user?: UserProfile; message?: string } {
-    const profiles = this.getProfiles();
+  async login(email: string, pass: string): Promise<{ success: boolean; user?: UserProfile; message?: string }> {
     const cleanEmail = email.trim().toLowerCase();
-    const user = profiles.find((p) => p.email.toLowerCase() === cleanEmail);
+    const cleanPass = pass.trim();
 
-    if (!user) {
-      return { success: false, message: 'Usuário não encontrado com este e-mail.' };
+    // 1. Tentar autenticação nativa via Supabase Auth
+    try {
+      const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: cleanPass,
+      });
+
+      if (!authErr && authData?.user) {
+        // Obter perfil na tabela public.profiles
+        const { data: pRow } = await supabase
+          .from('profiles')
+          .select('*')
+          .or(`id.eq.${authData.user.id},email.eq.${cleanEmail}`)
+          .maybeSingle();
+
+        const userProfile: UserProfile = pRow
+          ? {
+              id: pRow.id,
+              email: pRow.email,
+              fullName: pRow.full_name,
+              gender: pRow.gender || 'M',
+              phone: pRow.phone || '',
+              role: pRow.role || 'physio',
+              isAdmin: Boolean(pRow.is_admin),
+              password: pRow.password || cleanPass,
+              crefito: pRow.crefito || '',
+              commissionRate: Number(pRow.commission_rate ?? 60),
+              mustChangePassword: Boolean(pRow.must_change_password),
+              hasCompletedTour: Boolean(pRow.has_completed_tour ?? true),
+              active: pRow.active !== false,
+              createdAt: pRow.created_at || new Date().toISOString(),
+            }
+          : {
+              id: authData.user.id,
+              email: cleanEmail,
+              fullName: authData.user.user_metadata?.full_name || cleanEmail.split('@')[0],
+              gender: 'M',
+              phone: '',
+              role: 'physio',
+              isAdmin: false,
+              password: cleanPass,
+              crefito: '',
+              commissionRate: 60,
+              mustChangePassword: false,
+              hasCompletedTour: true,
+              active: true,
+              createdAt: new Date().toISOString(),
+            };
+
+        this.setCurrentUser(userProfile);
+        this.setAuthenticated(true);
+        this.logAudit('LOGIN_SUPABASE_AUTH', `Autenticação bem-sucedida via Supabase Auth: ${userProfile.fullName} (${cleanEmail}).`);
+        return { success: true, user: userProfile };
+      }
+    } catch (e) {
+      console.warn('Supabase Auth signInWithPassword aviso:', e);
     }
 
-    if (!user.active) {
-      return { success: false, message: 'Este usuário está inativo. Contate a administração.' };
+    // 2. Tentar autenticação na tabela public.profiles (para contas cadastradas diretamente na base de dados)
+    try {
+      const { data: pRow, error: dbErr } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('email', cleanEmail)
+        .maybeSingle();
+
+      if (!dbErr && pRow) {
+        if (pRow.active === false) {
+          return { success: false, message: 'Este usuário está inativo no sistema. Contate a administração.' };
+        }
+
+        const expectedPass = pRow.password || (pRow.is_admin ? 'admin123' : 'ortra123');
+        if (cleanPass === expectedPass || cleanPass === 'admin123' || cleanPass === 'ortra123') {
+          const userProfile: UserProfile = {
+            id: pRow.id,
+            email: pRow.email,
+            fullName: pRow.full_name,
+            gender: pRow.gender || 'M',
+            phone: pRow.phone || '',
+            role: pRow.role || 'physio',
+            isAdmin: Boolean(pRow.is_admin),
+            password: pRow.password || cleanPass,
+            crefito: pRow.crefito || '',
+            commissionRate: Number(pRow.commission_rate ?? 60),
+            mustChangePassword: Boolean(pRow.must_change_password),
+            hasCompletedTour: Boolean(pRow.has_completed_tour ?? true),
+            active: pRow.active !== false,
+            createdAt: pRow.created_at || new Date().toISOString(),
+          };
+
+          // Sincronizar na auth do Supabase em background para logins futuros
+          supabase.auth.signUp({ email: cleanEmail, password: cleanPass }).catch(() => {});
+
+          this.setCurrentUser(userProfile);
+          this.setAuthenticated(true);
+          this.logAudit('LOGIN_SUPABASE_DB', `Autenticação bem-sucedida via Base PostgreSQL Supabase: ${userProfile.fullName} (${cleanEmail}).`);
+          return { success: true, user: userProfile };
+        }
+      }
+    } catch (dbEx) {
+      console.warn('Erro ao consultar profiles no Supabase:', dbEx);
     }
 
-    const expectedPass = user.password || (user.role === 'admin' ? 'admin123' : 'ortra123');
-    if (pass.trim() !== expectedPass && pass.trim() !== 'admin123' && pass.trim() !== 'ortra123') {
-      return { success: false, message: 'Senha incorreta.' };
+    // 3. Fallback para perfil local
+    const profiles = this.getProfiles();
+    const localUser = profiles.find((p) => p.email.toLowerCase() === cleanEmail);
+    if (localUser) {
+      const expected = localUser.password || (localUser.role === 'admin' ? 'admin123' : 'ortra123');
+      if (cleanPass === expected || cleanPass === 'admin123' || cleanPass === 'ortra123') {
+        this.setCurrentUser(localUser);
+        this.setAuthenticated(true);
+        return { success: true, user: localUser };
+      }
     }
 
-    this.setCurrentUser(user);
-    this.setAuthenticated(true);
-    this.logAudit('LOGIN_SUCESSO', `Usuário ${user.fullName} (${user.email}) realizou login.`);
-    return { success: true, user };
+    return { success: false, message: 'E-mail ou senha incorretos na base de dados do Supabase.' };
   }
 
-  logout(): void {
+  async logout(): Promise<void> {
     const user = this.getCurrentUser();
     this.logAudit('LOGOFF', `Usuário ${user?.fullName || ''} encerrou a sessão.`);
     this.setAuthenticated(false);
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.warn('Supabase signOut notice:', e);
+    }
+  }
+
+  // --- Supabase Synchronization Methods ---
+  async syncFromSupabase(): Promise<{ ok: boolean; message: string; count?: number }> {
+    try {
+      let totalSynced = 0;
+
+      // 1. Sync Profiles
+      const { data: pData, error: pErr } = await supabase.from('profiles').select('*');
+      if (!pErr && pData && pData.length > 0) {
+        const mappedProfiles: UserProfile[] = pData.map((row: any) => ({
+          id: row.id,
+          email: row.email,
+          fullName: row.full_name || row.fullName,
+          gender: (row.gender as 'M' | 'F') || 'M',
+          phone: row.phone || '',
+          role: row.role || 'physio',
+          isAdmin: Boolean(row.is_admin ?? row.isAdmin),
+          password: row.password || 'ortra123',
+          crefito: row.crefito || '',
+          commissionRate: Number(row.commission_rate ?? row.commissionRate ?? 60),
+          mustChangePassword: Boolean(row.must_change_password ?? row.mustChangePassword),
+          hasCompletedTour: Boolean(row.has_completed_tour ?? row.hasCompletedTour ?? true),
+          active: row.active !== false,
+          createdAt: row.created_at || new Date().toISOString(),
+        }));
+        this.set(STORAGE_KEYS.PROFILES, mappedProfiles);
+        totalSynced += mappedProfiles.length;
+      }
+
+      // 2. Sync Patients (Sem mocks: reflete estritamente a base de dados)
+      const { data: patData, error: patErr } = await supabase.from('patients').select('*');
+      if (!patErr && Array.isArray(patData)) {
+        const mappedPatients: Patient[] = patData.map((row: any) => ({
+          id: row.id,
+          physioId: row.physio_id || row.physioId,
+          fullName: row.full_name || row.fullName,
+          cpf: row.cpf,
+          birthDate: row.birth_date || row.birthDate,
+          phone: row.phone || '',
+          healthInsurance: row.health_insurance || row.healthInsurance || 'Particular',
+          emergencyContact: typeof row.emergency_contact === 'string'
+            ? { name: row.emergency_contact_name || '', phone: row.emergency_contact, relationship: '' }
+            : (row.emergency_contact || { name: '', relationship: '', phone: '' }),
+          profession: row.profession || '',
+          defaultSessionValue: Number(row.default_session_value ?? row.defaultSessionValue ?? 160),
+          notes: row.notes || '',
+          createdAt: row.created_at || new Date().toISOString(),
+        }));
+        this.set(STORAGE_KEYS.PATIENTS, mappedPatients);
+        totalSynced += mappedPatients.length;
+      }
+
+      // 3. Sync Insurance Plans
+      const { data: planData, error: planErr } = await supabase.from('insurance_plans').select('*');
+      if (!planErr && planData && planData.length > 0) {
+        const mappedPlans: HealthInsurancePlan[] = planData.map((row: any) => ({
+          id: row.id,
+          name: row.name,
+          baseSessionValue: Number(row.base_session_value ?? row.baseSessionValue ?? 120),
+          paymentTermDays: Number(row.payment_term_days ?? row.paymentTermDays ?? 30),
+          active: row.active !== false,
+          logoUrl: row.logo_url || row.logoUrl || '',
+        }));
+        this.set(STORAGE_KEYS.INSURANCE_PLANS, mappedPlans);
+        totalSynced += mappedPlans.length;
+      }
+
+      // 4. Sync Assessments (Estritamente base de dados)
+      const { data: assData, error: assErr } = await supabase.from('assessments').select('*');
+      if (!assErr && Array.isArray(assData)) {
+        const mappedAssessments: Assessment[] = assData.map((row: any) => ({
+          id: row.id,
+          patientId: row.patient_id || row.patientId,
+          physioId: row.physio_id || row.physioId,
+          createdAt: row.created_at || new Date().toISOString(),
+          anamnesis: row.anamnesis,
+          physicalExam: row.physical_exam || row.physicalExam,
+          diagnosisAndPlan: row.diagnosis_and_plan || row.diagnosisAndPlan,
+        }));
+        this.set(STORAGE_KEYS.ASSESSMENTS, mappedAssessments);
+        totalSynced += mappedAssessments.length;
+      }
+
+      // 5. Sync Evolutions (Estritamente base de dados)
+      const { data: evoData, error: evoErr } = await supabase.from('evolutions').select('*');
+      if (!evoErr && Array.isArray(evoData)) {
+        const mappedEvolutions: Evolution[] = evoData.map((row: any) => ({
+          id: row.id,
+          patientId: row.patient_id || row.patientId,
+          physioId: row.physio_id || row.physioId,
+          sessionDate: row.session_date || row.sessionDate,
+          sessionNumber: Number(row.session_number ?? row.sessionNumber ?? 1),
+          description: row.description || '',
+          evaBefore: Number(row.eva_before ?? row.evaBefore ?? 0),
+          evaAfter: Number(row.eva_after ?? row.evaAfter ?? 0),
+          attendanceStatus: row.attendance_status || row.attendanceStatus || 'completed',
+          sessionValue: Number(row.session_value ?? row.sessionValue ?? 160),
+          paymentStatus: row.payment_status || row.paymentStatus || 'paid',
+          paymentMethod: row.payment_method || row.paymentMethod || 'Pix',
+          createdAt: row.created_at || new Date().toISOString(),
+        }));
+        this.set(STORAGE_KEYS.EVOLUTIONS, mappedEvolutions);
+        totalSynced += mappedEvolutions.length;
+      }
+
+      // 6. Sync Clinic Settings
+      const { data: setRow, error: setErr } = await supabase.from('clinic_settings').select('*').limit(1).maybeSingle();
+      if (!setErr && setRow) {
+        const mappedSettings: ClinicSettings = {
+          clinicName: setRow.clinic_name || setRow.clinicName,
+          commercialName: setRow.commercial_name || setRow.commercialName,
+          cnpj: setRow.cnpj,
+          address: setRow.address,
+          phone: setRow.phone,
+          email: setRow.email,
+          defaultPhysioCommission: Number(setRow.default_physio_commission ?? setRow.defaultPhysioCommission ?? 60),
+          technicalResponsible: setRow.technical_responsible || setRow.technicalResponsible,
+          technicalResponsibleCrefito: setRow.technical_responsible_crefito || setRow.technicalResponsibleCrefito,
+        };
+        this.set(STORAGE_KEYS.CLINIC_SETTINGS, mappedSettings);
+      }
+
+      // 7. Sync Audit Logs
+      const { data: logData, error: logErr } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(100);
+      if (!logErr && Array.isArray(logData)) {
+        const mappedLogs: AuditLog[] = logData.map((row: any) => ({
+          id: row.id,
+          timestamp: row.created_at || row.timestamp || new Date().toISOString(),
+          userId: row.user_id || row.userId,
+          userName: row.user_name || row.userName || 'Sistema',
+          userRole: row.user_role || row.userRole || 'admin',
+          action: row.action,
+          details: row.details || '',
+          ipAddress: row.ip_address || row.ipAddress || '',
+        }));
+        this.set(STORAGE_KEYS.AUDIT_LOGS, mappedLogs);
+        totalSynced += mappedLogs.length;
+      }
+
+      return { ok: true, message: 'Dados sincronizados do Supabase com sucesso.', count: totalSynced };
+    } catch (err: any) {
+      console.warn('Erro ao sincronizar do Supabase:', err);
+      return { ok: false, message: err?.message || 'Falha na sincronização' };
+    }
   }
 
   getProfiles(): UserProfile[] {
     return this.get<UserProfile[]>(STORAGE_KEYS.PROFILES, INITIAL_PROFILES);
   }
 
-  saveProfile(profile: UserProfile): void {
+  async saveProfile(
+    profile: UserProfile
+  ): Promise<{ success: boolean; error?: string; code?: string; sqlFix?: string }> {
+    const cleanProfile: UserProfile = {
+      ...profile,
+      id: ensureUUID(profile.id),
+    };
+
+    // 1. Tentar gravar diretamente na tabela public.profiles do Supabase
+    const payload = {
+      id: cleanProfile.id,
+      email: cleanProfile.email,
+      full_name: cleanProfile.fullName,
+      gender: cleanProfile.gender || 'M',
+      phone: cleanProfile.phone,
+      role: cleanProfile.role,
+      is_admin: Boolean(cleanProfile.isAdmin),
+      password: cleanProfile.password || 'ortra123',
+      crefito: cleanProfile.crefito,
+      commission_rate: cleanProfile.commissionRate,
+      default_session_rate: 0,
+      must_change_password: cleanProfile.mustChangePassword,
+      has_completed_tour: cleanProfile.hasCompletedTour,
+      active: cleanProfile.active,
+      created_at: cleanProfile.createdAt,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase.from('profiles').upsert(payload);
+
+    if (error) {
+      console.error('Erro ao salvar fisioterapeuta no Supabase:', error);
+      const isFkConstraint =
+        error.code === '23503' ||
+        error.message?.includes('profiles_id_fkey') ||
+        error.message?.includes('foreign key constraint') ||
+        error.message?.includes('users');
+
+      if (isFkConstraint) {
+        // Armazena localmente para o administrador não perder os dados do profissional
+        const profiles = this.getProfiles();
+        const idx = profiles.findIndex(
+          (p) => p.id === cleanProfile.id || p.email.toLowerCase() === cleanProfile.email.toLowerCase()
+        );
+        let updated: UserProfile[];
+        if (idx >= 0) {
+          updated = [...profiles];
+          updated[idx] = cleanProfile;
+        } else {
+          updated = [cleanProfile, ...profiles];
+        }
+        this.set(STORAGE_KEYS.PROFILES, updated);
+
+        return {
+          success: false,
+          code: '23503',
+          error:
+            'A tabela "profiles" no Supabase possui a restrição de chave estrangeira (profiles_id_fkey) apontando para auth.users, impedindo o cadastro direto pelo Administrador.',
+          sqlFix: 'ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_id_fkey;',
+        };
+      }
+
+      return { success: false, error: error.message };
+    }
+
+    // 2. Registrar no Supabase Auth para habilitar login
+    try {
+      await supabase.auth.signUp({
+        email: cleanProfile.email,
+        password: cleanProfile.password || 'ortra123',
+        options: {
+          data: {
+            full_name: cleanProfile.fullName,
+            role: cleanProfile.role,
+          },
+        },
+      });
+    } catch (authErr) {
+      console.warn('Aviso Supabase Auth cadastro:', authErr);
+    }
+
     const profiles = this.getProfiles();
-    const idx = profiles.findIndex((p) => p.id === profile.id);
+    const idx = profiles.findIndex((p) => p.id === cleanProfile.id);
     let updated: UserProfile[];
     if (idx >= 0) {
       updated = [...profiles];
-      updated[idx] = profile;
+      updated[idx] = cleanProfile;
     } else {
-      updated = [profile, ...profiles];
+      updated = [cleanProfile, ...profiles];
     }
     this.set(STORAGE_KEYS.PROFILES, updated);
 
-    // If updating current user
+    // Se estiver atualizando o usuário logado
     const current = this.getCurrentUser();
-    if (current.id === profile.id) {
-      this.setCurrentUser(profile);
+    if (current.id === cleanProfile.id) {
+      this.setCurrentUser(cleanProfile);
     }
+
+    return { success: true };
   }
 
   deleteProfile(profileId: string): boolean {
+    const normalizedId = ensureUUID(profileId);
     const profiles = this.getProfiles();
-    const target = profiles.find((p) => p.id === profileId);
+    const target = profiles.find((p) => p.id === normalizedId || p.id === profileId);
     if (!target) return false;
 
-    const updated = profiles.filter((p) => p.id !== profileId);
+    const updated = profiles.filter((p) => p.id !== target.id);
     this.set(STORAGE_KEYS.PROFILES, updated);
 
     this.logAudit(
@@ -590,52 +613,92 @@ class ClinicalStorageService {
       `Usuário ${target.fullName} (${target.email} - ${target.role}) foi excluído pelo administrador.`
     );
 
+    // Delete in Supabase
+    supabase.from('profiles').delete().eq('id', target.id).then(({ error }) => {
+      if (error) console.warn('Supabase profiles delete:', error.message);
+    });
+
     // If deleted user was active current user, switch to admin or another profile
     const current = this.getCurrentUser();
-    if (current.id === profileId) {
+    if (current.id === target.id) {
       const fallback = updated[0] || INITIAL_PROFILES[0];
       this.setCurrentUser(fallback);
     }
     return true;
   }
 
-  // --- Patients ---
+  // --- Patients (Sem dados demo: puramente base de dados) ---
   getPatients(): Patient[] {
-    return this.get<Patient[]>(STORAGE_KEYS.PATIENTS, INITIAL_PATIENTS);
+    return this.get<Patient[]>(STORAGE_KEYS.PATIENTS, []);
   }
 
   getPatientById(id: string): Patient | undefined {
     return this.getPatients().find((p) => p.id === id);
   }
 
-  savePatient(patient: Patient): void {
+  async savePatient(patient: Patient): Promise<{ success: boolean; error?: string }> {
+    const cleanPatient: Patient = {
+      ...patient,
+      id: ensureUUID(patient.id),
+      physioId: ensureUUID(patient.physioId),
+    };
+
+    // 1. Gravar diretamente na base de dados do Supabase com compatibilidade de colunas
+    const { error } = await supabase.from('patients').upsert({
+      id: cleanPatient.id,
+      physio_id: cleanPatient.physioId,
+      full_name: cleanPatient.fullName,
+      cpf: cleanPatient.cpf,
+      birth_date: cleanPatient.birthDate,
+      phone: cleanPatient.phone,
+      health_insurance: cleanPatient.healthInsurance,
+      emergency_contact: (cleanPatient.emergencyContact?.phone || cleanPatient.phone || '').slice(0, 20),
+      emergency_contact_name: cleanPatient.emergencyContact?.name || '',
+      profession: cleanPatient.profession,
+      default_session_value: cleanPatient.defaultSessionValue,
+      notes: cleanPatient.notes,
+      created_at: cleanPatient.createdAt,
+      updated_at: new Date().toISOString(),
+    });
+
+    if (error) {
+      console.error('Erro ao salvar paciente no Supabase:', error);
+      return { success: false, error: error.message };
+    }
+
     const patients = this.getPatients();
-    const idx = patients.findIndex((p) => p.id === patient.id);
+    const idx = patients.findIndex((p) => p.id === cleanPatient.id);
     let updated: Patient[];
     if (idx >= 0) {
       updated = [...patients];
-      updated[idx] = patient;
+      updated[idx] = cleanPatient;
     } else {
-      updated = [patient, ...patients];
+      updated = [cleanPatient, ...patients];
     }
     this.set(STORAGE_KEYS.PATIENTS, updated);
 
     this.logAudit(
       idx >= 0 ? 'ATUALIZACAO_PACIENTE' : 'CADASTRO_PACIENTE',
-      `Paciente: ${patient.fullName} (CPF: ${patient.cpf})`
+      `Paciente: ${cleanPatient.fullName} (CPF: ${cleanPatient.cpf}) registrado na base de dados do Supabase.`
     );
+
+    return { success: true };
   }
 
   transferPatientPortfolio(sourcePhysioId: string, targetPhysioId: string): number {
+    const sId = ensureUUID(sourcePhysioId);
+    const tId = ensureUUID(targetPhysioId);
     const patients = this.getPatients();
-    const sourceProfile = this.getProfiles().find((p) => p.id === sourcePhysioId);
-    const targetProfile = this.getProfiles().find((p) => p.id === targetPhysioId);
+    const sourceProfile = this.getProfiles().find((p) => p.id === sId);
+    const targetProfile = this.getProfiles().find((p) => p.id === tId);
     let count = 0;
 
     const updated = patients.map((pat) => {
-      if (pat.physioId === sourcePhysioId) {
+      if (pat.physioId === sId || pat.physioId === sourcePhysioId) {
         count++;
-        return { ...pat, physioId: targetPhysioId };
+        // Update in Supabase
+        supabase.from('patients').update({ physio_id: tId }).eq('id', pat.id).then();
+        return { ...pat, physioId: tId };
       }
       return pat;
     });
@@ -650,62 +713,118 @@ class ClinicalStorageService {
     return count;
   }
 
-  // --- Assessments ---
+  // --- Assessments (Estritamente base de dados) ---
   getAssessments(): Assessment[] {
-    return this.get<Assessment[]>(STORAGE_KEYS.ASSESSMENTS, INITIAL_ASSESSMENTS);
+    return this.get<Assessment[]>(STORAGE_KEYS.ASSESSMENTS, []);
   }
 
   getAssessmentsForPatient(patientId: string): Assessment[] {
-    return this.getAssessments().filter((a) => a.patientId === patientId);
+    const pId = ensureUUID(patientId);
+    return this.getAssessments().filter((a) => a.patientId === pId || a.patientId === patientId);
   }
 
-  saveAssessment(assessment: Assessment): void {
+  async saveAssessment(assessment: Assessment): Promise<{ success: boolean; error?: string }> {
+    const cleanAssessment: Assessment = {
+      ...assessment,
+      id: ensureUUID(assessment.id),
+      patientId: ensureUUID(assessment.patientId),
+      physioId: ensureUUID(assessment.physioId),
+    };
+
+    const { error } = await supabase.from('assessments').upsert({
+      id: cleanAssessment.id,
+      patient_id: cleanAssessment.patientId,
+      physio_id: cleanAssessment.physioId,
+      anamnesis: cleanAssessment.anamnesis,
+      physical_exam: cleanAssessment.physicalExam,
+      diagnosis_and_plan: cleanAssessment.diagnosisAndPlan,
+      created_at: cleanAssessment.createdAt,
+    });
+
+    if (error) {
+      console.error('Erro ao salvar avaliação no Supabase:', error);
+      return { success: false, error: error.message };
+    }
+
     const assessments = this.getAssessments();
-    const idx = assessments.findIndex((a) => a.id === assessment.id);
+    const idx = assessments.findIndex((a) => a.id === cleanAssessment.id);
     let updated: Assessment[];
     if (idx >= 0) {
       updated = [...assessments];
-      updated[idx] = assessment;
+      updated[idx] = cleanAssessment;
     } else {
-      updated = [assessment, ...assessments];
+      updated = [cleanAssessment, ...assessments];
     }
     this.set(STORAGE_KEYS.ASSESSMENTS, updated);
 
-    const pat = this.getPatientById(assessment.patientId);
+    const pat = this.getPatientById(cleanAssessment.patientId);
     this.logAudit(
       'NOVA_AVALIACAO_CLINICA',
-      `Avaliação registrada para o paciente ${pat?.fullName || assessment.patientId}`
+      `Avaliação registrada para o paciente ${pat?.fullName || cleanAssessment.patientId} na base Supabase.`
     );
+
+    return { success: true };
   }
 
-  // --- Evolutions ---
+  // --- Evolutions (Estritamente base de dados) ---
   getEvolutions(): Evolution[] {
-    return this.get<Evolution[]>(STORAGE_KEYS.EVOLUTIONS, INITIAL_EVOLUTIONS);
+    return this.get<Evolution[]>(STORAGE_KEYS.EVOLUTIONS, []);
   }
 
   getEvolutionsForPatient(patientId: string): Evolution[] {
+    const pId = ensureUUID(patientId);
     return this.getEvolutions()
-      .filter((e) => e.patientId === patientId)
+      .filter((e) => e.patientId === pId || e.patientId === patientId)
       .sort((a, b) => new Date(b.sessionDate).getTime() - new Date(a.sessionDate).getTime());
   }
 
-  saveEvolution(evolution: Evolution): void {
+  async saveEvolution(evolution: Evolution): Promise<{ success: boolean; error?: string }> {
+    const cleanEvolution: Evolution = {
+      ...evolution,
+      id: ensureUUID(evolution.id),
+      patientId: ensureUUID(evolution.patientId),
+      physioId: ensureUUID(evolution.physioId),
+    };
+
+    const { error } = await supabase.from('evolutions').upsert({
+      id: cleanEvolution.id,
+      patient_id: cleanEvolution.patientId,
+      physio_id: cleanEvolution.physioId,
+      session_date: cleanEvolution.sessionDate,
+      session_number: cleanEvolution.sessionNumber,
+      description: cleanEvolution.description,
+      eva_before: cleanEvolution.evaBefore,
+      eva_after: cleanEvolution.evaAfter,
+      attendance_status: cleanEvolution.attendanceStatus,
+      session_value: cleanEvolution.sessionValue,
+      payment_status: cleanEvolution.paymentStatus,
+      payment_method: cleanEvolution.paymentMethod,
+      created_at: cleanEvolution.createdAt,
+    });
+
+    if (error) {
+      console.error('Erro ao salvar evolução no Supabase:', error);
+      return { success: false, error: error.message };
+    }
+
     const evolutions = this.getEvolutions();
-    const idx = evolutions.findIndex((e) => e.id === evolution.id);
+    const idx = evolutions.findIndex((e) => e.id === cleanEvolution.id);
     let updated: Evolution[];
     if (idx >= 0) {
       updated = [...evolutions];
-      updated[idx] = evolution;
+      updated[idx] = cleanEvolution;
     } else {
-      updated = [evolution, ...evolutions];
+      updated = [cleanEvolution, ...evolutions];
     }
     this.set(STORAGE_KEYS.EVOLUTIONS, updated);
 
-    const pat = this.getPatientById(evolution.patientId);
+    const pat = this.getPatientById(cleanEvolution.patientId);
     this.logAudit(
       'REGISTRO_EVOLUCAO_SESSAO',
-      `Sessão ${evolution.sessionNumber} (${evolution.attendanceStatus}) para ${pat?.fullName || evolution.patientId}. Valor: R$ ${evolution.sessionValue}`
+      `Sessão ${cleanEvolution.sessionNumber} (${cleanEvolution.attendanceStatus}) para ${pat?.fullName || cleanEvolution.patientId}. Valor: R$ ${cleanEvolution.sessionValue}`
     );
+
+    return { success: true };
   }
 
   // --- Health Insurance Plans ---
@@ -728,6 +847,18 @@ class ClinicalStorageService {
       idx >= 0 ? 'ATUALIZACAO_CONVENIO' : 'CADASTRO_CONVENIO',
       `Tabela de convênio "${plan.name}" com valor base de R$ ${plan.baseSessionValue}.`
     );
+
+    // Persist to Supabase
+    supabase.from('insurance_plans').upsert({
+      id: plan.id,
+      name: plan.name,
+      base_session_value: plan.baseSessionValue,
+      payment_term_days: plan.paymentTermDays,
+      active: plan.active,
+      logo_url: plan.logoUrl,
+    }).then(({ error }) => {
+      if (error) console.warn('Supabase insurance_plans upsert:', error.message);
+    });
   }
 
   deleteInsurancePlan(planId: string): boolean {
@@ -737,6 +868,12 @@ class ClinicalStorageService {
     const updated = plans.filter((p) => p.id !== planId);
     this.set(STORAGE_KEYS.INSURANCE_PLANS, updated);
     this.logAudit('EXCLUSAO_CONVENIO', `Convênio "${target.name}" excluído.`);
+
+    // Delete in Supabase
+    supabase.from('insurance_plans').delete().eq('id', planId).then(({ error }) => {
+      if (error) console.warn('Supabase insurance_plans delete:', error.message);
+    });
+
     return true;
   }
 
@@ -748,9 +885,9 @@ class ClinicalStorageService {
   logAudit(action: string, details: string): void {
     const current = this.getCurrentUser();
     const log: AuditLog = {
-      id: `audit_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      id: generateUUID(),
       timestamp: new Date().toISOString(),
-      userId: current.id,
+      userId: ensureUUID(current.id),
       userName: current.fullName,
       userRole: current.role,
       action,
@@ -759,6 +896,20 @@ class ClinicalStorageService {
     };
     const logs = this.getAuditLogs();
     this.set(STORAGE_KEYS.AUDIT_LOGS, [log, ...logs.slice(0, 100)]);
+
+    // Persist to Supabase (table has column 'created_at')
+    supabase.from('audit_logs').insert({
+      id: log.id,
+      created_at: log.timestamp,
+      user_id: log.userId,
+      user_name: log.userName,
+      user_role: log.userRole,
+      action: log.action,
+      details: log.details,
+      ip_address: log.ipAddress,
+    }).then(({ error }) => {
+      if (error) console.warn('Supabase audit_logs insert:', error.message);
+    });
   }
 
   // --- Clinic Settings ---
@@ -769,9 +920,25 @@ class ClinicalStorageService {
   saveClinicSettings(settings: ClinicSettings): void {
     this.set(STORAGE_KEYS.CLINIC_SETTINGS, settings);
     this.logAudit('CONFIGURACOES_CLINICA', 'Atualização dos dados institucionais da Clínica Ortra.');
+
+    // Persist to Supabase
+    supabase.from('clinic_settings').upsert({
+      id: 'primary',
+      clinic_name: settings.clinicName,
+      commercial_name: settings.commercialName,
+      cnpj: settings.cnpj,
+      address: settings.address,
+      phone: settings.phone,
+      email: settings.email,
+      default_physio_commission: settings.defaultPhysioCommission,
+      technical_responsible: settings.technicalResponsible,
+      technical_responsible_crefito: settings.technicalResponsibleCrefito,
+    }).then(({ error }) => {
+      if (error) console.warn('Supabase clinic_settings upsert:', error.message);
+    });
   }
 
-  // Reset to initial demo data
+  // Reset cache and re-sync from Supabase
   resetDemoData(): void {
     localStorage.removeItem(STORAGE_KEYS.PROFILES);
     localStorage.removeItem(STORAGE_KEYS.PATIENTS);
@@ -780,7 +947,8 @@ class ClinicalStorageService {
     localStorage.removeItem(STORAGE_KEYS.INSURANCE_PLANS);
     localStorage.removeItem(STORAGE_KEYS.AUDIT_LOGS);
     localStorage.removeItem(STORAGE_KEYS.CLINIC_SETTINGS);
-    this.setCurrentUser(INITIAL_PROFILES[1]); // default Dr. Marcelo
+    this.setCurrentUser(INITIAL_PROFILES[0]);
+    this.syncFromSupabase();
   }
 }
 

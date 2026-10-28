@@ -46,7 +46,7 @@ export interface Patient {
   emergencyContact: EmergencyContact;
   profession: string;
   defaultSessionValue: number;
-  onboardingChecklist: PatientChecklist;
+  onboardingChecklist?: PatientChecklist;
   createdAt: string;
   notes?: string;
 }
@@ -58,6 +58,7 @@ export interface AttachedFile {
   type: string;
   date: string;
   url?: string;
+  path?: string;
 }
 
 export interface GoniometryMeasurement {

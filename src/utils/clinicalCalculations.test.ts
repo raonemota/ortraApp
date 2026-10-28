@@ -84,3 +84,10 @@ test('hasAdminPrivileges identifies admin and physio-admin roles', () => {
   assert.equal(hasAdminPrivileges({ role: 'physio', isAdmin: false }), false);
   assert.equal(hasAdminPrivileges(null), false);
 });
+
+test('UUID format regex matches UUIDs correctly', () => {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  assert.equal(uuidRegex.test('b0000000-0000-4000-8000-000000000001'), true);
+  assert.equal(uuidRegex.test('pat_01'), false);
+  assert.equal(uuidRegex.test('user_admin_01'), false);
+});

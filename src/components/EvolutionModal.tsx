@@ -13,6 +13,7 @@ import {
   CheckCircle,
   AlertCircle,
   FileText,
+  Loader2,
 } from 'lucide-react';
 import {
   Patient,
@@ -22,7 +23,7 @@ import {
   PaymentStatus,
 } from '../types/index.ts';
 import { EvaSlider } from './EvaSlider.tsx';
-import { clinicalStorage } from '../services/storageService.ts';
+import { clinicalStorage, generateUUID, ensureUUID } from '../services/storageService.ts';
 
 interface EvolutionModalProps {
   patient: Patient;
@@ -74,10 +75,11 @@ export const EvolutionModal: React.FC<EvolutionModalProps> = ({
     existingEvolution?.paymentMethod || 'Pix'
   );
   const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -87,9 +89,9 @@ export const EvolutionModal: React.FC<EvolutionModalProps> = ({
     }
 
     const evolutionData: Evolution = {
-      id: existingEvolution ? existingEvolution.id : `evo_${Date.now()}`,
-      patientId: patient.id,
-      physioId: currentUser.id,
+      id: existingEvolution ? existingEvolution.id : generateUUID(),
+      patientId: ensureUUID(patient.id),
+      physioId: ensureUUID(currentUser.id),
       sessionDate: new Date(sessionDateTime).toISOString(),
       sessionNumber: existingEvolution
         ? existingEvolution.sessionNumber
@@ -104,9 +106,21 @@ export const EvolutionModal: React.FC<EvolutionModalProps> = ({
       createdAt: existingEvolution ? existingEvolution.createdAt : new Date().toISOString(),
     };
 
-    clinicalStorage.saveEvolution(evolutionData);
-    onEvolutionSaved(evolutionData);
-    onClose();
+    setIsSaving(true);
+    try {
+      const res = await clinicalStorage.saveEvolution(evolutionData);
+      if (!res.success) {
+        setError(`Erro ao salvar evolução no Supabase: ${res.error || 'Falha de comunicação'}`);
+        setIsSaving(false);
+        return;
+      }
+      onEvolutionSaved(evolutionData);
+      onClose();
+    } catch (err: any) {
+      setError(`Falha inesperada ao salvar: ${err?.message || 'Erro de rede'}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -295,9 +309,17 @@ export const EvolutionModal: React.FC<EvolutionModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-5 py-2 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg shadow-sm transition-colors"
+              disabled={isSaving}
+              className="flex items-center gap-1.5 px-5 py-2 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 disabled:opacity-60 rounded-lg shadow-sm transition-colors"
             >
-              {existingEvolution ? 'Salvar Alterações' : 'Registrar Evolução da Sessão'}
+              {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              <span>
+                {isSaving
+                  ? 'Salvando no Supabase...'
+                  : existingEvolution
+                  ? 'Salvar Alterações'
+                  : 'Registrar Evolução da Sessão'}
+              </span>
             </button>
           </div>
         </form>

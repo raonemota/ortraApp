@@ -15,6 +15,7 @@ import {
   Building,
   DollarSign,
   HeartPulse,
+  Loader2,
 } from 'lucide-react';
 import { Patient, UserProfile, HealthInsurancePlan } from '../types/index.ts';
 import {
@@ -23,7 +24,7 @@ import {
   formatPhone,
   calculateAge,
 } from '../utils/clinicalCalculations.ts';
-import { clinicalStorage } from '../services/storageService.ts';
+import { clinicalStorage, generateUUID, ensureUUID } from '../services/storageService.ts';
 
 interface PatientFormModalProps {
   isOpen: boolean;
@@ -52,6 +53,7 @@ export const PatientFormModal: React.FC<PatientFormModalProps> = ({
   const [defaultSessionValue, setDefaultSessionValue] = useState(160);
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const plans: HealthInsurancePlan[] = clinicalStorage.getInsurancePlans();
 
@@ -98,7 +100,7 @@ export const PatientFormModal: React.FC<PatientFormModalProps> = ({
   const currentAge = birthDate ? calculateAge(birthDate) : null;
   const isCpfValid = cpf ? validateCPF(cpf) : null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -118,8 +120,8 @@ export const PatientFormModal: React.FC<PatientFormModalProps> = ({
     }
 
     const patientData: Patient = {
-      id: initialPatient ? initialPatient.id : `pat_${Date.now()}`,
-      physioId: initialPatient ? initialPatient.physioId : currentUser.id,
+      id: initialPatient ? initialPatient.id : generateUUID(),
+      physioId: ensureUUID(initialPatient ? initialPatient.physioId : currentUser.id),
       fullName: fullName.trim(),
       cpf: formatCPF(cpf),
       birthDate,
@@ -142,9 +144,21 @@ export const PatientFormModal: React.FC<PatientFormModalProps> = ({
       notes: notes.trim(),
     };
 
-    clinicalStorage.savePatient(patientData);
-    onPatientSaved(patientData);
-    onClose();
+    setIsSaving(true);
+    try {
+      const res = await clinicalStorage.savePatient(patientData);
+      if (!res.success) {
+        setError(`Erro ao salvar paciente na base Supabase: ${res.error || 'Falha de gravação'}`);
+        setIsSaving(false);
+        return;
+      }
+      onPatientSaved(patientData);
+      onClose();
+    } catch (err: any) {
+      setError(`Falha inesperada: ${err?.message || 'Erro de rede'}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -418,9 +432,17 @@ export const PatientFormModal: React.FC<PatientFormModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-5 py-2 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg shadow-sm transition-colors"
+              disabled={isSaving}
+              className="flex items-center gap-1.5 px-5 py-2 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 disabled:opacity-60 rounded-lg shadow-sm transition-colors"
             >
-              {initialPatient ? 'Salvar Alterações' : 'Concluir Cadastro e Abrir Checklist'}
+              {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              <span>
+                {isSaving
+                  ? 'Gravando no Supabase...'
+                  : initialPatient
+                  ? 'Salvar Alterações'
+                  : 'Salvar Paciente na Base'}
+              </span>
             </button>
           </div>
         </form>

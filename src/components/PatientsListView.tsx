@@ -9,12 +9,10 @@ import {
   Search,
   Filter,
   UserPlus,
-  Calendar,
-  AlertCircle,
-  CheckCircle2,
   Activity,
   ChevronRight,
-  Building,
+  LayoutGrid,
+  List,
 } from 'lucide-react';
 import {
   Patient,
@@ -39,7 +37,6 @@ interface PatientsListViewProps {
   onSelectPatient: (patient: Patient) => void;
   onOpenNewPatientModal: () => void;
   onQuickEvolution: (patient: Patient) => void;
-  onOpenChecklist: (patient: Patient) => void;
 }
 
 export const PatientsListView: React.FC<PatientsListViewProps> = ({
@@ -51,10 +48,10 @@ export const PatientsListView: React.FC<PatientsListViewProps> = ({
   onSelectPatient,
   onOpenNewPatientModal,
   onQuickEvolution,
-  onOpenChecklist,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [insuranceFilter, setInsuranceFilter] = useState('all');
+  const [viewMode, setViewMode] = useState<'boxes' | 'list'>('boxes');
 
   const isAdmin = hasAdminPrivileges(currentUser);
   const [physioFilter, setPhysioFilter] = useState(isAdmin ? 'all' : currentUser.id);
@@ -67,29 +64,58 @@ export const PatientsListView: React.FC<PatientsListViewProps> = ({
     return list.filter(Boolean);
   }, [patients]);
 
-  // Filtered patients (Strict RBAC: non-admin physios only see their own patients)
+  // Robust query and RBAC filter
   const filteredPatients = useMemo(() => {
-    const query = searchQuery.toLowerCase().trim();
+    const rawQuery = searchQuery.trim();
+    const normalizedQuery = rawQuery
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+    const queryNumbers = rawQuery.replace(/\D/g, '');
+
     return patients.filter((p) => {
-      // Physio filter
+      // 1. RBAC & Physio Filter
       if (!isAdmin) {
         if (p.physioId !== currentUser.id) return false;
       } else if (physioFilter !== 'all' && p.physioId !== physioFilter) {
         return false;
       }
 
-      // Insurance filter
+      // 2. Insurance filter
       if (insuranceFilter !== 'all' && p.healthInsurance !== insuranceFilter) {
         return false;
       }
 
-      // Query filter
-      if (query) {
-        const matchName = p.fullName.toLowerCase().includes(query);
-        const matchCpf = p.cpf.replace(/\D/g, '').includes(query.replace(/\D/g, ''));
-        const matchPhone = p.phone.replace(/\D/g, '').includes(query.replace(/\D/g, ''));
-        if (!matchName && !matchCpf && !matchPhone) return false;
+      // 3. Search Query Filter
+      if (rawQuery) {
+        const normName = (p.fullName || '')
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '');
+        const normProf = (p.profession || '')
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '');
+        const normIns = (p.healthInsurance || '')
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '');
+
+        const matchText =
+          normName.includes(normalizedQuery) ||
+          normProf.includes(normalizedQuery) ||
+          normIns.includes(normalizedQuery);
+
+        let matchNumber = false;
+        if (queryNumbers.length > 0) {
+          const cleanCpf = (p.cpf || '').replace(/\D/g, '');
+          const cleanPhone = (p.phone || '').replace(/\D/g, '');
+          matchNumber = cleanCpf.includes(queryNumbers) || cleanPhone.includes(queryNumbers);
+        }
+
+        if (!matchText && !matchNumber) return false;
       }
+
       return true;
     });
   }, [patients, isAdmin, currentUser.id, physioFilter, insuranceFilter, searchQuery]);
@@ -104,7 +130,7 @@ export const PatientsListView: React.FC<PatientsListViewProps> = ({
           </h1>
           <p className="text-[11px] sm:text-xs text-slate-500">
             {isAdmin
-              ? 'Visão Administrativa Geral: acompanhe todos os pacientes, pendências e prontuários da clínica.'
+              ? 'Visão Administrativa Geral: acompanhe todos os pacientes e prontuários da clínica.'
               : `Sua Carteira de Atendimento: gerencie os pacientes e evoluções sob os cuidados de ${formatPhysioDisplayName(currentUser)}.`}
           </p>
         </div>
@@ -119,7 +145,7 @@ export const PatientsListView: React.FC<PatientsListViewProps> = ({
         </button>
       </div>
 
-      {/* Filter and Search Bar */}
+      {/* Filter and Search Bar with View Mode Toggle */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 bg-white p-3 sm:p-4 rounded-xl sm:rounded-2xl border border-slate-200 shadow-xs">
         {/* Search Input */}
         <div className="relative flex-1 min-w-[200px]">
@@ -133,7 +159,7 @@ export const PatientsListView: React.FC<PatientsListViewProps> = ({
           />
         </div>
 
-        {/* Filter Controls */}
+        {/* Filter Controls & View Switcher */}
         <div className="flex flex-wrap items-center gap-2">
           {/* Insurance Filter */}
           <div className="flex items-center gap-1 text-xs text-slate-600">
@@ -176,47 +202,71 @@ export const PatientsListView: React.FC<PatientsListViewProps> = ({
               Meus Pacientes
             </span>
           )}
+
+          {/* View Mode Toggle: Cards (Boxes) vs List (Compact Table) */}
+          <div className="flex items-center rounded-lg border border-slate-300 p-0.5 bg-slate-100">
+            <button
+              type="button"
+              onClick={() => setViewMode('boxes')}
+              title="Visualização em Cards"
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                viewMode === 'boxes'
+                  ? 'bg-white text-teal-900 shadow-2xs font-bold'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              <span className="hidden md:inline">Cards</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              title="Visualização em Tabela Compacta"
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                viewMode === 'list'
+                  ? 'bg-white text-teal-900 shadow-2xs font-bold'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <List className="h-3.5 w-3.5" />
+              <span className="hidden md:inline">Tabela Compacta</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Patients Grid / Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-        {filteredPatients.length === 0 ? (
-          <div className="col-span-full rounded-xl sm:rounded-2xl border border-dashed border-slate-300 p-8 sm:p-12 text-center bg-white">
-            <Users className="h-8 w-8 text-slate-300 mx-auto mb-2" />
-            <h3 className="text-sm font-bold text-slate-800">Nenhum paciente encontrado</h3>
-            <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-              Tente redefinir a busca ou cadastre um novo paciente para iniciar o prontuário.
-            </p>
-            <button
-              type="button"
-              onClick={onOpenNewPatientModal}
-              className="mt-3 px-4 py-2 rounded-lg text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 transition-colors shadow-sm"
-            >
-              Cadastrar Paciente Agora
-            </button>
-          </div>
-        ) : (
-          filteredPatients.map((pat) => {
+      {/* Empty State */}
+      {filteredPatients.length === 0 ? (
+        <div className="rounded-xl sm:rounded-2xl border border-dashed border-slate-300 p-8 sm:p-12 text-center bg-white">
+          <Users className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+          <h3 className="text-sm font-bold text-slate-800">
+            {patients.length === 0
+              ? 'Nenhum paciente cadastrado na base de dados'
+              : 'Nenhum paciente encontrado'}
+          </h3>
+          <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+            {patients.length === 0
+              ? 'A base de dados do Supabase está limpa e sincronizada. Cadastre seu primeiro paciente abaixo para iniciar os atendimentos.'
+              : 'Tente redefinir os filtros ou o termo de pesquisa inserido.'}
+          </p>
+          <button
+            type="button"
+            onClick={onOpenNewPatientModal}
+            className="mt-3 px-4 py-2 rounded-lg text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 transition-colors shadow-sm"
+          >
+            Cadastrar Paciente Agora
+          </button>
+        </div>
+      ) : viewMode === 'boxes' ? (
+        /* MODO 1: BOXES / CARDS (Sem checklist) */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+          {filteredPatients.map((pat) => {
             const age = calculateAge(pat.birthDate);
             const assignedPhysio = physioList.find((p) => p.id === pat.physioId);
             const patEvolutions = evolutions.filter((e) => e.patientId === pat.id);
             const patAssessments = assessments.filter((a) => a.patientId === pat.id);
             const planObj = plans.find((pl) => pl.name === pat.healthInsurance);
-
-            const checklist = pat.onboardingChecklist || {
-              consentLgpdSigned: false,
-              identificationVerified: false,
-              rulesExplained: false,
-              firstAssessmentScheduled: false,
-            };
-            const hasPendingChecklist =
-              !checklist.consentLgpdSigned ||
-              !checklist.identificationVerified ||
-              !checklist.rulesExplained ||
-              !checklist.firstAssessmentScheduled;
-
-            const cleanPhone = pat.phone.replace(/\D/g, '');
+            const cleanPhone = (pat.phone || '').replace(/\D/g, '');
 
             return (
               <div
@@ -259,7 +309,7 @@ export const PatientsListView: React.FC<PatientsListViewProps> = ({
                   </div>
 
                   {/* Card Details */}
-                  <div className="space-y-1 text-xs text-slate-600 mb-3">
+                  <div className="space-y-1.5 text-xs text-slate-600 mb-2">
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400 text-[11px]">CPF:</span>
                       <span className="font-medium text-slate-800">{pat.cpf}</span>
@@ -296,28 +346,6 @@ export const PatientsListView: React.FC<PatientsListViewProps> = ({
                       </span>
                     </div>
                   </div>
-
-                  {/* Checklist Status */}
-                  <div className="mb-3">
-                    {hasPendingChecklist ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenChecklist(pat)}
-                        className="w-full flex items-center justify-between p-1.5 sm:p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[10px] sm:text-[11px] font-semibold hover:bg-amber-100 transition-colors"
-                      >
-                        <span className="flex items-center gap-1.5">
-                          <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
-                          <span>Checklist Pendente (LGPD / Docs)</span>
-                        </span>
-                        <span className="underline">Validar</span>
-                      </button>
-                    ) : (
-                      <div className="flex items-center gap-1.5 p-1.5 rounded-lg bg-emerald-50/70 border border-emerald-200 text-emerald-800 text-[10px] sm:text-[11px] font-medium">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                        <span>Checklist de Integração Completo</span>
-                      </div>
-                    )}
-                  </div>
                 </div>
 
                 {/* Card Actions */}
@@ -343,9 +371,131 @@ export const PatientsListView: React.FC<PatientsListViewProps> = ({
                 </div>
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      ) : (
+        /* MODO 2: LISTA / TABELA COMPACTA (Visão Profissional de Alto Desempenho) */
+        <div className="rounded-xl sm:rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-700">
+              <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                <tr>
+                  <th className="py-2.5 px-4">Paciente</th>
+                  <th className="py-2.5 px-3">CPF</th>
+                  <th className="py-2.5 px-3">Contato</th>
+                  <th className="py-2.5 px-3">Convênio</th>
+                  <th className="py-2.5 px-3">Fisioterapeuta</th>
+                  <th className="py-2.5 px-3 text-center">Atendimentos</th>
+                  <th className="py-2.5 px-4 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredPatients.map((pat) => {
+                  const age = calculateAge(pat.birthDate);
+                  const assignedPhysio = physioList.find((p) => p.id === pat.physioId);
+                  const patEvolutions = evolutions.filter((e) => e.patientId === pat.id);
+                  const patAssessments = assessments.filter((a) => a.patientId === pat.id);
+                  const planObj = plans.find((pl) => pl.name === pat.healthInsurance);
+                  const cleanPhone = (pat.phone || '').replace(/\D/g, '');
+
+                  return (
+                    <tr
+                      key={pat.id}
+                      className="hover:bg-slate-50/80 transition-colors group cursor-pointer"
+                      onClick={() => onSelectPatient(pat)}
+                    >
+                      <td className="py-2.5 px-4">
+                        <div className="flex items-center gap-2.5">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-teal-50 border border-teal-200 text-teal-800 font-bold text-xs uppercase">
+                            {getPersonInitials(pat.fullName)}
+                          </div>
+                          <div>
+                            <span className="font-bold text-slate-900 group-hover:text-teal-700 block">
+                              {pat.fullName}
+                            </span>
+                            <span className="text-[10px] text-slate-400 block">
+                              {age} anos {pat.profession ? `· ${pat.profession}` : ''}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600">
+                        {pat.cpf}
+                      </td>
+
+                      <td className="py-2.5 px-3">
+                        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          <span className="text-[11px] text-slate-700">{pat.phone}</span>
+                          {cleanPhone && (
+                            <a
+                              href={`https://wa.me/55${cleanPhone}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded hover:bg-emerald-100"
+                            >
+                              Zap
+                            </a>
+                          )}
+                        </div>
+                      </td>
+
+                      <td className="py-2.5 px-3">
+                        <div className="flex items-center gap-1.5">
+                          {planObj?.logoUrl && (
+                            <img
+                              src={planObj.logoUrl}
+                              alt={pat.healthInsurance}
+                              className="h-4 w-4 rounded object-cover border border-slate-200"
+                              onError={(e) => ((e.target as HTMLElement).style.display = 'none')}
+                            />
+                          )}
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
+                            {pat.healthInsurance}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="py-2.5 px-3 font-medium text-slate-800 text-[11px]">
+                        {assignedPhysio ? formatPhysioDisplayName(assignedPhysio) : 'Clínica Ortra'}
+                      </td>
+
+                      <td className="py-2.5 px-3 text-center">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                          {patEvolutions.length} sessões · {patAssessments.length} aval.
+                        </span>
+                      </td>
+
+                      <td className="py-2.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => onQuickEvolution(pat)}
+                            title="Registrar Evolução"
+                            className="p-1 sm:px-2 sm:py-1 rounded-md text-[11px] font-semibold text-slate-700 hover:bg-slate-200 bg-slate-100 transition-colors flex items-center gap-1"
+                          >
+                            <Activity className="h-3.5 w-3.5 text-teal-700" />
+                            <span className="hidden sm:inline">Evolução</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onSelectPatient(pat)}
+                            title="Abrir Prontuário"
+                            className="p-1 sm:px-2.5 sm:py-1 rounded-md text-[11px] font-bold text-white bg-slate-900 hover:bg-slate-800 transition-colors flex items-center gap-1"
+                          >
+                            <span>Prontuário</span>
+                            <ChevronRight className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -47,7 +47,7 @@ interface PatientDetailViewProps {
   onNewAssessment: () => void;
   onNewEvolution: () => void;
   onEditPatient: () => void;
-  onOpenChecklist: () => void;
+  onOpenChecklist?: () => void;
   onPrintAssessment: (assessment: Assessment) => void;
 }
 
@@ -61,7 +61,6 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
   onNewAssessment,
   onNewEvolution,
   onEditPatient,
-  onOpenChecklist,
   onPrintAssessment,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'evolutions' | 'assessments' | 'pain_chart'>(
@@ -187,39 +186,6 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
             </span>
           </div>
         </div>
-
-        {/* Checklist Alert / Status Banner (RF05) */}
-        {checklistPending ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 border border-amber-200 p-3.5 text-xs text-amber-900">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
-              <span>
-                <strong>Pendências no Checklist de Integração:</strong> Termo LGPD ou documento necessitam de validação.
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={onOpenChecklist}
-              className="px-3 py-1 rounded-lg text-xs font-bold text-amber-900 bg-amber-200/70 hover:bg-amber-200 transition-colors"
-            >
-              Abrir Checklist
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between rounded-xl bg-emerald-50/70 border border-emerald-200 p-3 text-xs text-emerald-900">
-            <div className="flex items-center gap-2">
-              <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
-              <span>Checklist de Integração e Termo LGPD 100% validados.</span>
-            </div>
-            <button
-              type="button"
-              onClick={onOpenChecklist}
-              className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 underline"
-            >
-              Ver itens
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Tabs: Evoluções vs Avaliações */}
@@ -317,49 +283,8 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                         ) : (
                           <span className="text-rose-700 font-semibold">Falta Não Justificada</span>
                         )}
-
-                        <span
-                          className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
-                            isPaid
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                              : 'bg-amber-50 text-amber-800 border-amber-200'
-                          }`}
-                        >
-                          {isPaid ? 'Pago' : 'Pendente'} ({formatCurrencyBRL(evo.sessionValue)})
-                        </span>
                       </div>
                     </div>
-
-                    {/* EVA Before & After Badges */}
-                    {evo.attendanceStatus === 'completed' && (
-                      <div className="flex flex-wrap items-center gap-4 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
-                        <div className="flex items-center gap-2">
-                          <span className="text-slate-500 font-medium">Dor Entrada:</span>
-                          <span
-                            className={`px-2 py-0.5 rounded-md font-bold text-xs border ${evaBeforeInfo.badgeClass}`}
-                          >
-                            EVA {evo.evaBefore}
-                          </span>
-                        </div>
-
-                        <span className="text-slate-300">➔</span>
-
-                        <div className="flex items-center gap-2">
-                          <span className="text-slate-500 font-medium">Dor Saída:</span>
-                          <span
-                            className={`px-2 py-0.5 rounded-md font-bold text-xs border ${evaAfterInfo.badgeClass}`}
-                          >
-                            EVA {evo.evaAfter}
-                          </span>
-                        </div>
-
-                        {evo.evaBefore > evo.evaAfter && (
-                          <span className="text-[11px] font-bold text-emerald-700 ml-auto">
-                            Alívio de {evo.evaBefore - evo.evaAfter} pontos na sessão
-                          </span>
-                        )}
-                      </div>
-                    )}
 
                     {/* Description */}
                     <p className="text-xs text-slate-700 whitespace-pre-line leading-relaxed">

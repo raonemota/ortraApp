@@ -180,7 +180,12 @@ export const Header: React.FC<HeaderProps> = ({
 
               {/* User Switcher & Logout Dropdown */}
               {userDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-64 rounded-xl bg-white text-slate-900 shadow-xl border border-slate-200 py-2 z-50">
+                <>
+                  <div
+                    className="fixed inset-0 z-40 bg-transparent"
+                    onClick={() => setUserDropdownOpen(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-64 rounded-xl bg-white text-slate-900 shadow-xl border border-slate-200 py-2 z-50">
                   <div className="px-3 py-1.5 border-b border-slate-100">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                       Alternar Perfil Ativo (Demo)
@@ -236,19 +241,9 @@ export const Header: React.FC<HeaderProps> = ({
                     </button>
                   </div>
                 </div>
-              )}
+              </>
+            )}
             </div>
-
-            {/* Direct Logout Button in Desktop Header */}
-            <button
-              type="button"
-              onClick={onLogout}
-              title="Fazer logoff do sistema"
-              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/80 transition-colors"
-            >
-              <LogOut className="h-3.5 w-3.5 text-rose-400" />
-              <span>Sair</span>
-            </button>
           </div>
         </div>
 
