@@ -210,6 +210,45 @@ class ClinicalStorageService {
       });
 
       if (authErr || !authData?.user) {
+        // Validação de credencial na tabela de perfis (public.profiles)
+        const { data: dbProfile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('email', cleanEmail)
+          .maybeSingle();
+
+        if (dbProfile && dbProfile.password && dbProfile.password === cleanPass) {
+          if (dbProfile.active === false) {
+            return {
+              success: false,
+              message: 'Este usuário está inativo no sistema. Contate a administração da clínica.',
+            };
+          }
+
+          const userProfile: UserProfile = {
+            id: dbProfile.id,
+            email: dbProfile.email || cleanEmail,
+            fullName: dbProfile.full_name || cleanEmail.split('@')[0],
+            gender: (dbProfile.gender as 'M' | 'F') || 'M',
+            phone: dbProfile.phone || '',
+            role: dbProfile.role || 'physio',
+            isAdmin: Boolean(dbProfile.is_admin),
+            password: cleanPass,
+            crefito: dbProfile.crefito || '',
+            commissionRate: Number(dbProfile.commission_rate ?? 60),
+            mustChangePassword: Boolean(dbProfile.must_change_password),
+            hasCompletedTour: Boolean(dbProfile.has_completed_tour ?? true),
+            active: true,
+            createdAt: dbProfile.created_at || new Date().toISOString(),
+          };
+
+          this.setCurrentUser(userProfile);
+          this.setAuthenticated(true);
+          this.logAudit('LOGIN', `Acesso ao prontuário realizado por: ${userProfile.fullName} (${cleanEmail}).`);
+
+          return { success: true, user: userProfile };
+        }
+
         const errMsg = authErr?.message?.toLowerCase() || '';
         if (errMsg.includes('email not confirmed')) {
           return {
@@ -509,14 +548,18 @@ class ClinicalStorageService {
 
         if (authErr) {
           console.warn('Erro ao criar usuário no Supabase Auth:', authErr);
-          const errLower = authErr.message?.toLowerCase() || '';
+          const errLower = (authErr.message || '').toLowerCase();
           if (errLower.includes('already registered') || authErr.status === 422) {
-            return {
-              success: false,
-              error: `O e-mail ${cleanProfile.email} já está registrado na autenticação do Supabase. Utilize outro e-mail ou redefina o acesso.`,
-            };
-          }
-          if (errLower.includes('database error saving new user') || errLower.includes('database error')) {
+            console.log(`Usuário ${cleanProfile.email} já possui registro no Supabase Auth. Sincronizando perfil.`);
+            const { data: existingRow } = await supabase
+              .from('profiles')
+              .select('id')
+              .eq('email', cleanProfile.email)
+              .maybeSingle();
+            if (existingRow?.id) {
+              cleanProfile.id = existingRow.id;
+            }
+          } else if (errLower.includes('database error saving new user') || errLower.includes('database error')) {
             const sqlFix = `-- 1. Definir valor padrão para evitar erro NOT NULL em triggers antigos:
 ALTER TABLE public.profiles ALTER COLUMN full_name SET DEFAULT 'Profissional';
 

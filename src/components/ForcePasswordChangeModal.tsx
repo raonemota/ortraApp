@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { Lock, ShieldCheck, KeyRound, AlertCircle } from 'lucide-react';
 import { UserProfile } from '../types/index.ts';
 import { clinicalStorage } from '../services/storageService.ts';
+import { supabase } from '../services/supabaseClient.ts';
 
 interface ForcePasswordChangeModalProps {
   user: UserProfile;
@@ -22,7 +23,7 @@ export const ForcePasswordChangeModal: React.FC<ForcePasswordChangeModalProps> =
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -36,19 +37,31 @@ export const ForcePasswordChangeModal: React.FC<ForcePasswordChangeModalProps> =
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
+    try {
       const updated: UserProfile = {
         ...user,
+        password: newPassword,
         mustChangePassword: false,
       };
-      clinicalStorage.saveProfile(updated);
+
+      await clinicalStorage.saveProfile(updated);
+
+      try {
+        await supabase.auth.updateUser({ password: newPassword });
+      } catch (authErr) {
+        console.warn('Aviso ao sincronizar senha no Supabase Auth:', authErr);
+      }
+
       clinicalStorage.logAudit(
         'TROCA_SENHA_OBRIGATORIA',
         `Usuário ${user.fullName} (${user.email}) atualizou a senha temporária com sucesso.`
       );
-      setIsSubmitting(false);
       onPasswordChanged(updated);
-    }, 400);
+    } catch (err: any) {
+      setError(err?.message || 'Erro ao atualizar a senha. Tente novamente.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (

@@ -23,6 +23,9 @@ import {
   UploadCloud,
   Loader2,
   Copy,
+  Eye,
+  EyeOff,
+  RefreshCw,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -69,6 +72,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [physioPhone, setPhysioPhone] = useState('');
   const [physioCrefito, setPhysioCrefito] = useState('CREFITO-');
   const [physioCommission, setPhysioCommission] = useState(60);
+  const [physioPassword, setPhysioPassword] = useState('Ortra@123456');
+  const [showPhysioPassword, setShowPhysioPassword] = useState(false);
   const [isSavingPhysio, setIsSavingPhysio] = useState(false);
   const [physioError, setPhysioError] = useState<string | null>(null);
   const [physioSqlFix, setPhysioSqlFix] = useState<string | null>(null);
@@ -121,7 +126,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     setIsSavingPhysio(true);
     try {
-      const tempPassword = `Ortra@${Math.floor(100000 + Math.random() * 900000)}`;
+      const tempPassword = physioPassword.trim() || `Ortra@${Math.floor(100000 + Math.random() * 900000)}`;
       const newProfile: UserProfile = {
         id: generateUUID(),
         fullName: cleanName,
@@ -170,6 +175,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setPhysioPhone('');
       setPhysioCrefito('CREFITO-');
       setPhysioCommission(60);
+      setPhysioPassword(`Ortra@${Math.floor(100000 + Math.random() * 900000)}`);
       setIsAddingPhysio(false);
       onProfilesUpdated();
     } catch (err: any) {
@@ -567,6 +573,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     />
                   </div>
 
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label htmlFor="new-physio-password" className="block text-xs font-semibold text-slate-700">
+                        Senha Inicial de Acesso *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setPhysioPassword(`Ortra@${Math.floor(100000 + Math.random() * 900000)}`)}
+                        className="text-[10px] font-bold text-teal-700 hover:text-teal-900 flex items-center gap-1"
+                        title="Gerar nova senha aleatória"
+                      >
+                        <RefreshCw className="h-3 w-3" /> Gerar Nova
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        id="new-physio-password"
+                        type={showPhysioPassword ? 'text' : 'password'}
+                        required
+                        value={physioPassword}
+                        onChange={(e) => setPhysioPassword(e.target.value)}
+                        placeholder="Ex: Ortra@123456"
+                        className="w-full rounded-lg border border-slate-300 bg-white pl-2.5 pr-8 py-1.5 text-xs text-slate-900 font-mono font-bold"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPhysioPassword(!showPhysioPassword)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        title={showPhysioPassword ? 'Ocultar senha' : 'Ver senha'}
+                      >
+                        {showPhysioPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
                   {newUserRole === 'physio' && (
                     <>
                       <div>
@@ -648,7 +689,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[10px]">
                   <tr>
                     <th className="py-2.5 px-3">Profissional</th>
-                    <th className="py-2.5 px-3">CREFito</th>
+                    <th className="py-2.5 px-3">CREFITO</th>
+                    <th className="py-2.5 px-3">Senha de Acesso</th>
                     <th className="py-2.5 px-3">Repasse</th>
                     <th className="py-2.5 px-3">Pacientes</th>
                     <th className="py-2.5 px-3">Função</th>
@@ -688,6 +730,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                         <td className="py-2.5 px-3 font-semibold text-slate-800">
                           {isRec ? '-' : p.crefito || 'CREFITO-7'}
+                        </td>
+
+                        <td className="py-2.5 px-3">
+                          <code
+                            className="text-[11px] font-mono font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 select-all"
+                            title="Senha de acesso deste usuário"
+                          >
+                            {p.password || '******'}
+                          </code>
                         </td>
 
                         <td className="py-2.5 px-3">
