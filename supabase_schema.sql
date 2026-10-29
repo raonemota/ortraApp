@@ -40,6 +40,47 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS commission_rate NUMERIC DEF
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS has_completed_tour BOOLEAN DEFAULT true;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
+ALTER TABLE public.profiles ALTER COLUMN full_name SET DEFAULT 'Profissional';
+
+-- Trigger seguro para espelhar auth.users em public.profiles sem causar 'Database error saving new user'
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP TRIGGER IF EXISTS tr_auth_user_created ON auth.users;
+DROP TRIGGER IF EXISTS on_user_created ON auth.users;
+DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger
+SECURITY DEFINER
+SET search_path = public
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO public.profiles (
+    id, email, full_name, role, is_admin, active, created_at, updated_at
+  )
+  VALUES (
+    new.id,
+    new.email,
+    COALESCE(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
+    COALESCE(new.raw_user_meta_data->>'role', 'physio'),
+    COALESCE((new.raw_user_meta_data->>'is_admin')::boolean, false),
+    true,
+    NOW(),
+    NOW()
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    updated_at = NOW();
+  RETURN new;
+EXCEPTION
+  WHEN OTHERS THEN
+    RETURN new; -- Previne travamento na inserção de auth.users
+END;
+$$;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- 3. TABELA: PATIENTS (Atualização de colunas e FK para profiles)
 CREATE TABLE IF NOT EXISTS public.patients (

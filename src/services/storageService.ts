@@ -11,8 +11,10 @@ import {
   HealthInsurancePlan,
   AuditLog,
   ClinicSettings,
+  Appointment,
+  AppointmentStatus,
 } from '../types/index.ts';
-import { supabase } from './supabaseClient.ts';
+import { supabase, authAdminClient } from './supabaseClient.ts';
 
 const STORAGE_KEYS = {
   CURRENT_USER: 'ortra_current_user',
@@ -24,6 +26,7 @@ const STORAGE_KEYS = {
   INSURANCE_PLANS: 'ortra_insurance_plans',
   AUDIT_LOGS: 'ortra_audit_logs',
   CLINIC_SETTINGS: 'ortra_clinic_settings',
+  APPOINTMENTS: 'ortra_appointments_v1',
 };
 
 // UUID Generation & Mapping Helpers
@@ -69,7 +72,7 @@ export function ensureUUID(id?: string | null): string {
   return generateUUID();
 }
 
-// Purge any legacy demo patient records from previous sessions
+// Purge any legacy demo patient and user records from previous sessions
 function purgeLegacyDemoData() {
   try {
     if (typeof localStorage !== 'undefined') {
@@ -82,6 +85,13 @@ function purgeLegacyDemoData() {
           localStorage.removeItem(STORAGE_KEYS.EVOLUTIONS);
         }
       }
+      const storedProfiles = localStorage.getItem(STORAGE_KEYS.PROFILES);
+      if (storedProfiles) {
+        const list = JSON.parse(storedProfiles);
+        if (Array.isArray(list) && list.some((p: any) => p.email === 'admin@ortra.com.br' || p.email === 'marcelo.carvalho@ortra.com.br')) {
+          localStorage.removeItem(STORAGE_KEYS.PROFILES);
+        }
+      }
     }
   } catch (e) {
     // Ignore storage parse errors
@@ -89,7 +99,7 @@ function purgeLegacyDemoData() {
 }
 purgeLegacyDemoData();
 
-// Default Initial Profiles (Aligned with Supabase database)
+// Default Initial Profiles (Reflects strictly real Supabase database)
 export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: '7b47fdfc-31d0-4259-9239-0836522aace7',
@@ -99,45 +109,13 @@ export const INITIAL_PROFILES: UserProfile[] = [
     phone: '(71) 98606-3671',
     role: 'admin',
     isAdmin: true,
-    password: 'admin123',
+    password: '',
     crefito: 'CREFITO-7/08921-F',
     commissionRate: 100,
     mustChangePassword: false,
     hasCompletedTour: true,
     active: true,
     createdAt: '2026-10-28T11:53:32Z',
-  },
-  {
-    id: 'a0000000-0000-4000-8000-000000000001',
-    email: 'admin@ortra.com.br',
-    fullName: 'Beatriz Ortra',
-    gender: 'F',
-    phone: '(71) 99876-5432',
-    role: 'admin',
-    isAdmin: true,
-    password: 'admin123',
-    crefito: 'CREFITO-7/08921-F',
-    commissionRate: 100,
-    mustChangePassword: false,
-    hasCompletedTour: true,
-    active: true,
-    createdAt: '2024-01-10T08:00:00Z',
-  },
-  {
-    id: 'a0000000-0000-4000-8000-000000000002',
-    email: 'marcelo.carvalho@ortra.com.br',
-    fullName: 'Marcelo Carvalho',
-    gender: 'M',
-    phone: '(71) 98123-4567',
-    role: 'physio',
-    isAdmin: false,
-    password: 'ortra123',
-    crefito: 'CREFITO-7/14298-F',
-    commissionRate: 60,
-    mustChangePassword: false,
-    hasCompletedTour: true,
-    active: true,
-    createdAt: '2024-02-15T09:30:00Z',
   },
 ];
 
@@ -209,7 +187,7 @@ class ClinicalStorageService {
   }
 
   isAuthenticated(): boolean {
-    return this.get<boolean>(STORAGE_KEYS.IS_AUTHENTICATED, true);
+    return this.get<boolean>(STORAGE_KEYS.IS_AUTHENTICATED, false);
   }
 
   setAuthenticated(status: boolean): void {
@@ -220,132 +198,103 @@ class ClinicalStorageService {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPass = pass.trim();
 
-    // 1. Tentar autenticação nativa via Supabase Auth
+    if (!cleanEmail || !cleanPass) {
+      return { success: false, message: 'Informe seu e-mail e senha para acessar o prontuário.' };
+    }
+
+    // Autenticação estrita e exclusiva nos usuários cadastrados no Supabase Auth
     try {
       const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
         password: cleanPass,
       });
 
-      if (!authErr && authData?.user) {
-        // Obter perfil na tabela public.profiles
-        const { data: pRow } = await supabase
-          .from('profiles')
-          .select('*')
-          .or(`id.eq.${authData.user.id},email.eq.${cleanEmail}`)
-          .maybeSingle();
-
-        const userProfile: UserProfile = pRow
-          ? {
-              id: pRow.id,
-              email: pRow.email,
-              fullName: pRow.full_name,
-              gender: pRow.gender || 'M',
-              phone: pRow.phone || '',
-              role: pRow.role || 'physio',
-              isAdmin: Boolean(pRow.is_admin),
-              password: pRow.password || cleanPass,
-              crefito: pRow.crefito || '',
-              commissionRate: Number(pRow.commission_rate ?? 60),
-              mustChangePassword: Boolean(pRow.must_change_password),
-              hasCompletedTour: Boolean(pRow.has_completed_tour ?? true),
-              active: pRow.active !== false,
-              createdAt: pRow.created_at || new Date().toISOString(),
-            }
-          : {
-              id: authData.user.id,
-              email: cleanEmail,
-              fullName: authData.user.user_metadata?.full_name || cleanEmail.split('@')[0],
-              gender: 'M',
-              phone: '',
-              role: 'physio',
-              isAdmin: false,
-              password: cleanPass,
-              crefito: '',
-              commissionRate: 60,
-              mustChangePassword: false,
-              hasCompletedTour: true,
-              active: true,
-              createdAt: new Date().toISOString(),
-            };
-
-        this.setCurrentUser(userProfile);
-        this.setAuthenticated(true);
-        this.logAudit('LOGIN_SUPABASE_AUTH', `Autenticação bem-sucedida via Supabase Auth: ${userProfile.fullName} (${cleanEmail}).`);
-        return { success: true, user: userProfile };
+      if (authErr || !authData?.user) {
+        const errMsg = authErr?.message?.toLowerCase() || '';
+        if (errMsg.includes('email not confirmed')) {
+          return {
+            success: false,
+            message: 'E-mail aguardando confirmação no Supabase. Para login imediato sem link de e-mail, desmarque "Confirm email" em Authentication > Providers > Email no painel Supabase.',
+          };
+        }
+        return {
+          success: false,
+          message: 'E-mail ou senha incorretos. Por favor, verifique suas credenciais de acesso.',
+        };
       }
-    } catch (e) {
-      console.warn('Supabase Auth signInWithPassword aviso:', e);
-    }
 
-    // 2. Tentar autenticação na tabela public.profiles (para contas cadastradas diretamente na base de dados)
-    try {
-      const { data: pRow, error: dbErr } = await supabase
+      // Obter dados clínicos do perfil na tabela public.profiles
+      const { data: pRow } = await supabase
         .from('profiles')
         .select('*')
-        .eq('email', cleanEmail)
+        .or(`id.eq.${authData.user.id},email.eq.${cleanEmail}`)
         .maybeSingle();
 
-      if (!dbErr && pRow) {
-        if (pRow.active === false) {
-          return { success: false, message: 'Este usuário está inativo no sistema. Contate a administração.' };
-        }
+      if (pRow && pRow.active === false) {
+        await supabase.auth.signOut();
+        return {
+          success: false,
+          message: 'Este usuário está inativo no sistema. Contate a administração da clínica.',
+        };
+      }
 
-        const expectedPass = pRow.password || (pRow.is_admin ? 'admin123' : 'ortra123');
-        if (cleanPass === expectedPass || cleanPass === 'admin123' || cleanPass === 'ortra123') {
-          const userProfile: UserProfile = {
+      const userProfile: UserProfile = pRow
+        ? {
             id: pRow.id,
-            email: pRow.email,
-            fullName: pRow.full_name,
-            gender: pRow.gender || 'M',
+            email: pRow.email || cleanEmail,
+            fullName: pRow.full_name || authData.user.user_metadata?.full_name || cleanEmail.split('@')[0],
+            gender: (pRow.gender as 'M' | 'F') || 'M',
             phone: pRow.phone || '',
             role: pRow.role || 'physio',
             isAdmin: Boolean(pRow.is_admin),
-            password: pRow.password || cleanPass,
+            password: cleanPass,
             crefito: pRow.crefito || '',
             commissionRate: Number(pRow.commission_rate ?? 60),
             mustChangePassword: Boolean(pRow.must_change_password),
             hasCompletedTour: Boolean(pRow.has_completed_tour ?? true),
-            active: pRow.active !== false,
+            active: true,
             createdAt: pRow.created_at || new Date().toISOString(),
+          }
+        : {
+            id: authData.user.id,
+            email: cleanEmail,
+            fullName: authData.user.user_metadata?.full_name || cleanEmail.split('@')[0],
+            gender: 'M',
+            phone: '',
+            role: 'physio',
+            isAdmin: false,
+            password: cleanPass,
+            crefito: '',
+            commissionRate: 60,
+            mustChangePassword: false,
+            hasCompletedTour: true,
+            active: true,
+            createdAt: new Date().toISOString(),
           };
 
-          // Sincronizar na auth do Supabase em background para logins futuros
-          supabase.auth.signUp({ email: cleanEmail, password: cleanPass }).catch(() => {});
+      this.setCurrentUser(userProfile);
+      this.setAuthenticated(true);
+      this.logAudit('LOGIN', `Acesso ao prontuário realizado por: ${userProfile.fullName} (${cleanEmail}).`);
 
-          this.setCurrentUser(userProfile);
-          this.setAuthenticated(true);
-          this.logAudit('LOGIN_SUPABASE_DB', `Autenticação bem-sucedida via Base PostgreSQL Supabase: ${userProfile.fullName} (${cleanEmail}).`);
-          return { success: true, user: userProfile };
-        }
-      }
-    } catch (dbEx) {
-      console.warn('Erro ao consultar profiles no Supabase:', dbEx);
+      return { success: true, user: userProfile };
+    } catch (err: any) {
+      console.warn('Erro ao autenticar:', err);
+      return {
+        success: false,
+        message: 'Não foi possível conectar ao sistema. Por favor, verifique sua conexão e tente novamente.',
+      };
     }
-
-    // 3. Fallback para perfil local
-    const profiles = this.getProfiles();
-    const localUser = profiles.find((p) => p.email.toLowerCase() === cleanEmail);
-    if (localUser) {
-      const expected = localUser.password || (localUser.role === 'admin' ? 'admin123' : 'ortra123');
-      if (cleanPass === expected || cleanPass === 'admin123' || cleanPass === 'ortra123') {
-        this.setCurrentUser(localUser);
-        this.setAuthenticated(true);
-        return { success: true, user: localUser };
-      }
-    }
-
-    return { success: false, message: 'E-mail ou senha incorretos na base de dados do Supabase.' };
   }
 
   async logout(): Promise<void> {
     const user = this.getCurrentUser();
     this.logAudit('LOGOFF', `Usuário ${user?.fullName || ''} encerrou a sessão.`);
     this.setAuthenticated(false);
+    this.set(STORAGE_KEYS.CURRENT_USER, null);
     try {
       await supabase.auth.signOut();
     } catch (e) {
-      console.warn('Supabase signOut notice:', e);
+      console.warn('Supabase signOut aviso:', e);
     }
   }
 
@@ -365,7 +314,7 @@ class ClinicalStorageService {
           phone: row.phone || '',
           role: row.role || 'physio',
           isAdmin: Boolean(row.is_admin ?? row.isAdmin),
-          password: row.password || 'ortra123',
+          password: row.password || '',
           crefito: row.crefito || '',
           commissionRate: Number(row.commission_rate ?? row.commissionRate ?? 60),
           mustChangePassword: Boolean(row.must_change_password ?? row.mustChangePassword),
@@ -487,6 +436,33 @@ class ClinicalStorageService {
         totalSynced += mappedLogs.length;
       }
 
+      // 8. Sync Appointments (se a tabela já tiver sido criada no Supabase)
+      try {
+        const { data: aptData, error: aptErr } = await supabase.from('appointments').select('*');
+        if (!aptErr && Array.isArray(aptData)) {
+          const mappedAppointments: Appointment[] = aptData.map((row: any) => ({
+            id: row.id,
+            patientId: row.patient_id || row.patientId,
+            physioId: row.physio_id || row.physioId,
+            date: row.date,
+            startTime: (row.start_time || row.startTime || '').slice(0, 5),
+            endTime: (row.end_time || row.endTime || '').slice(0, 5),
+            modality: row.modality || 'particular',
+            serviceType: row.service_type || row.serviceType || 'Cinesioterapia',
+            status: row.status || 'scheduled',
+            notes: row.notes || '',
+            sessionValue: Number(row.session_value ?? row.sessionValue ?? 0),
+            recurrenceGroupId: row.recurrence_group_id || row.recurrenceGroupId || undefined,
+            createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+            updatedAt: row.updated_at || row.updatedAt || undefined,
+          }));
+          this.set(STORAGE_KEYS.APPOINTMENTS, mappedAppointments);
+          totalSynced += mappedAppointments.length;
+        }
+      } catch (e) {
+        // Tabela de agendamentos ainda pendente de migração manual
+      }
+
       return { ok: true, message: 'Dados sincronizados do Supabase com sucesso.', count: totalSynced };
     } catch (err: any) {
       console.warn('Erro ao sincronizar do Supabase:', err);
@@ -499,14 +475,123 @@ class ClinicalStorageService {
   }
 
   async saveProfile(
-    profile: UserProfile
+    profile: UserProfile,
+    isNewUser: boolean = false
   ): Promise<{ success: boolean; error?: string; code?: string; sqlFix?: string }> {
     const cleanProfile: UserProfile = {
       ...profile,
       id: ensureUUID(profile.id),
+      email: profile.email.trim().toLowerCase(),
     };
 
-    // 1. Tentar gravar diretamente na tabela public.profiles do Supabase
+    const existingProfiles = this.getProfiles();
+    const existing = existingProfiles.find(
+      (p) => p.id === cleanProfile.id || p.email.toLowerCase() === cleanProfile.email
+    );
+
+    const isCreatingAuthUser = isNewUser || (!existing && Boolean(cleanProfile.password));
+
+    // 1. Criar PRIMEIRO no Supabase Authentication (auth.users)
+    // Usando authAdminClient (persistSession: false) para NÃO deslogar nem interferir na sessão do administrador
+    if (isCreatingAuthUser && cleanProfile.password) {
+      try {
+        const { data: authData, error: authErr } = await authAdminClient.auth.signUp({
+          email: cleanProfile.email,
+          password: cleanProfile.password,
+          options: {
+            data: {
+              full_name: cleanProfile.fullName,
+              role: cleanProfile.role,
+              crefito: cleanProfile.crefito || '',
+            },
+          },
+        });
+
+        if (authErr) {
+          console.warn('Erro ao criar usuário no Supabase Auth:', authErr);
+          const errLower = authErr.message?.toLowerCase() || '';
+          if (errLower.includes('already registered') || authErr.status === 422) {
+            return {
+              success: false,
+              error: `O e-mail ${cleanProfile.email} já está registrado na autenticação do Supabase. Utilize outro e-mail ou redefina o acesso.`,
+            };
+          }
+          if (errLower.includes('database error saving new user') || errLower.includes('database error')) {
+            const sqlFix = `-- 1. Definir valor padrão para evitar erro NOT NULL em triggers antigos:
+ALTER TABLE public.profiles ALTER COLUMN full_name SET DEFAULT 'Profissional';
+
+-- 2. Remover triggers quebrados que bloqueiam a inserção na tabela auth.users:
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP TRIGGER IF EXISTS tr_auth_user_created ON auth.users;
+DROP TRIGGER IF EXISTS on_user_created ON auth.users;
+DROP TRIGGER IF EXISTS create_profile_for_user ON auth.users;
+DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
+
+-- 3. (Recomendado) Recriar a função e o trigger com tratamento de erro seguro:
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger
+SECURITY DEFINER
+SET search_path = public
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO public.profiles (
+    id, email, full_name, role, is_admin, active, created_at, updated_at
+  )
+  VALUES (
+    new.id,
+    new.email,
+    COALESCE(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
+    COALESCE(new.raw_user_meta_data->>'role', 'physio'),
+    COALESCE((new.raw_user_meta_data->>'is_admin')::boolean, false),
+    true,
+    NOW(),
+    NOW()
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    updated_at = NOW();
+  RETURN new;
+EXCEPTION
+  WHEN OTHERS THEN
+    RETURN new; -- Evita travar a criação em auth.users caso ocorra divergência
+END;
+$$;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();`;
+
+            return {
+              success: false,
+              code: 'DATABASE_TRIGGER_ERROR',
+              error:
+                'O Supabase retornou "Database error saving new user". Isso ocorre quando há um Trigger na tabela auth.users (ex: handle_new_user) falhando ao rodar no PostgreSQL.',
+              sqlFix,
+            };
+          }
+
+          return {
+            success: false,
+            error: `Erro ao cadastrar na autenticação do Supabase: ${authErr.message}`,
+          };
+        }
+
+        // Se o Supabase Auth criou o usuário com sucesso, o ID em auth.users é a chave primária
+        if (authData?.user?.id) {
+          cleanProfile.id = authData.user.id;
+        }
+      } catch (authCatchErr: any) {
+        console.error('Falha de comunicação com o Supabase Auth:', authCatchErr);
+        return {
+          success: false,
+          error: `Falha ao conectar com o serviço de autenticação do Supabase: ${authCatchErr?.message || 'Erro desconhecido'}`,
+        };
+      }
+    }
+
+    // 2. Gravar os dados do profissional na tabela public.profiles do Supabase
+    // Como cleanProfile.id é o UUID exato de auth.users, a chave estrangeira (profiles_id_fkey) é 100% satisfeita!
     const payload = {
       id: cleanProfile.id,
       email: cleanProfile.email,
@@ -515,13 +600,13 @@ class ClinicalStorageService {
       phone: cleanProfile.phone,
       role: cleanProfile.role,
       is_admin: Boolean(cleanProfile.isAdmin),
-      password: cleanProfile.password || 'ortra123',
-      crefito: cleanProfile.crefito,
+      password: cleanProfile.password || '',
+      crefito: cleanProfile.crefito || '',
       commission_rate: cleanProfile.commissionRate,
       default_session_rate: 0,
       must_change_password: cleanProfile.mustChangePassword,
       has_completed_tour: cleanProfile.hasCompletedTour,
-      active: cleanProfile.active,
+      active: cleanProfile.active !== false,
       created_at: cleanProfile.createdAt,
       updated_at: new Date().toISOString(),
     };
@@ -540,7 +625,7 @@ class ClinicalStorageService {
         // Armazena localmente para o administrador não perder os dados do profissional
         const profiles = this.getProfiles();
         const idx = profiles.findIndex(
-          (p) => p.id === cleanProfile.id || p.email.toLowerCase() === cleanProfile.email.toLowerCase()
+          (p) => p.id === cleanProfile.id || p.email.toLowerCase() === cleanProfile.email
         );
         let updated: UserProfile[];
         if (idx >= 0) {
@@ -555,7 +640,7 @@ class ClinicalStorageService {
           success: false,
           code: '23503',
           error:
-            'A tabela "profiles" no Supabase possui a restrição de chave estrangeira (profiles_id_fkey) apontando para auth.users, impedindo o cadastro direto pelo Administrador.',
+            'A tabela "profiles" no Supabase possui a restrição de chave estrangeira (profiles_id_fkey) apontando para auth.users. O usuário não foi localizado em auth.users.',
           sqlFix: 'ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_id_fkey;',
         };
       }
@@ -563,24 +648,11 @@ class ClinicalStorageService {
       return { success: false, error: error.message };
     }
 
-    // 2. Registrar no Supabase Auth para habilitar login
-    try {
-      await supabase.auth.signUp({
-        email: cleanProfile.email,
-        password: cleanProfile.password || 'ortra123',
-        options: {
-          data: {
-            full_name: cleanProfile.fullName,
-            role: cleanProfile.role,
-          },
-        },
-      });
-    } catch (authErr) {
-      console.warn('Aviso Supabase Auth cadastro:', authErr);
-    }
-
+    // 3. Atualizar armazenamento local
     const profiles = this.getProfiles();
-    const idx = profiles.findIndex((p) => p.id === cleanProfile.id);
+    const idx = profiles.findIndex(
+      (p) => p.id === cleanProfile.id || p.email.toLowerCase() === cleanProfile.email
+    );
     let updated: UserProfile[];
     if (idx >= 0) {
       updated = [...profiles];
@@ -592,7 +664,7 @@ class ClinicalStorageService {
 
     // Se estiver atualizando o usuário logado
     const current = this.getCurrentUser();
-    if (current.id === cleanProfile.id) {
+    if (current && (current.id === cleanProfile.id || current.email.toLowerCase() === cleanProfile.email)) {
       this.setCurrentUser(cleanProfile);
     }
 
@@ -938,6 +1010,178 @@ class ClinicalStorageService {
     });
   }
 
+  // --- Appointments / Agenda ---
+  getAppointments(): Appointment[] {
+    return this.get<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
+  }
+
+  getAppointmentsByDate(date: string, physioId?: string): Appointment[] {
+    const all = this.getAppointments();
+    return all
+      .filter((a) => {
+        const matchDate = a.date === date;
+        const matchPhysio = !physioId || physioId === 'all' || a.physioId === physioId;
+        return matchDate && matchPhysio;
+      })
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
+  }
+
+  async saveAppointment(apt: Appointment): Promise<{ ok: boolean; message?: string }> {
+    const list = this.getAppointments();
+    const existingIndex = list.findIndex((a) => a.id === apt.id);
+    const updatedApt: Appointment = {
+      ...apt,
+      id: apt.id || generateUUID(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    let updatedList: Appointment[];
+    if (existingIndex >= 0) {
+      updatedList = [...list];
+      updatedList[existingIndex] = updatedApt;
+    } else {
+      updatedList = [updatedApt, ...list];
+    }
+
+    this.set(STORAGE_KEYS.APPOINTMENTS, updatedList);
+    this.logAudit(
+      existingIndex >= 0 ? 'ATUALIZACAO_AGENDAMENTO' : 'CRIACAO_AGENDAMENTO',
+      `Sessão agendada para ${updatedApt.date} às ${updatedApt.startTime}`
+    );
+
+    // Persist to Supabase if table exists
+    try {
+      const { error } = await supabase.from('appointments').upsert({
+        id: ensureUUID(updatedApt.id),
+        patient_id: ensureUUID(updatedApt.patientId),
+        physio_id: ensureUUID(updatedApt.physioId),
+        date: updatedApt.date,
+        start_time: updatedApt.startTime,
+        end_time: updatedApt.endTime,
+        modality: updatedApt.modality,
+        service_type: updatedApt.serviceType,
+        status: updatedApt.status,
+        notes: updatedApt.notes || null,
+        session_value: updatedApt.sessionValue || 0,
+        recurrence_group_id: updatedApt.recurrenceGroupId ? ensureUUID(updatedApt.recurrenceGroupId) : null,
+        created_at: updatedApt.createdAt || new Date().toISOString(),
+        updated_at: updatedApt.updatedAt,
+      });
+      if (error && error.code !== 'PGRST205') {
+        console.warn('Supabase appointments upsert:', error.message);
+      }
+    } catch (e) {
+      // Table may not exist yet
+    }
+
+    return { ok: true };
+  }
+
+  async saveMultipleAppointments(apts: Appointment[]): Promise<{ ok: boolean; message?: string }> {
+    const list = this.getAppointments();
+    const now = new Date().toISOString();
+    const processedApts = apts.map((a) => ({
+      ...a,
+      id: a.id || generateUUID(),
+      updatedAt: now,
+    }));
+
+    const aptMap = new Map<string, Appointment>();
+    list.forEach((a) => aptMap.set(a.id, a));
+    processedApts.forEach((a) => aptMap.set(a.id, a));
+
+    const updatedList = Array.from(aptMap.values());
+    this.set(STORAGE_KEYS.APPOINTMENTS, updatedList);
+    this.logAudit(
+      'CRIACAO_SERIE_AGENDAMENTOS',
+      `${processedApts.length} sessões adicionadas à agenda.`
+    );
+
+    try {
+      const rows = processedApts.map((a) => ({
+        id: ensureUUID(a.id),
+        patient_id: ensureUUID(a.patientId),
+        physio_id: ensureUUID(a.physioId),
+        date: a.date,
+        start_time: a.startTime,
+        end_time: a.endTime,
+        modality: a.modality,
+        service_type: a.serviceType,
+        status: a.status,
+        notes: a.notes || null,
+        session_value: a.sessionValue || 0,
+        recurrence_group_id: a.recurrenceGroupId ? ensureUUID(a.recurrenceGroupId) : null,
+        created_at: a.createdAt || now,
+        updated_at: a.updatedAt,
+      }));
+      const { error } = await supabase.from('appointments').upsert(rows);
+      if (error && error.code !== 'PGRST205') {
+        console.warn('Supabase appointments batch upsert:', error.message);
+      }
+    } catch (e) {
+      // Table may not exist yet
+    }
+
+    return { ok: true };
+  }
+
+  async updateAppointmentStatus(id: string, status: AppointmentStatus): Promise<{ ok: boolean; message?: string }> {
+    const list = this.getAppointments();
+    const apt = list.find((a) => a.id === id);
+    if (!apt) return { ok: false, message: 'Agendamento não encontrado' };
+
+    const updatedApt: Appointment = {
+      ...apt,
+      status,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updatedList = list.map((a) => (a.id === id ? updatedApt : a));
+    this.set(STORAGE_KEYS.APPOINTMENTS, updatedList);
+    this.logAudit(
+      'STATUS_AGENDAMENTO',
+      `Status do agendamento alterado para "${status}" (${apt.date} ${apt.startTime})`
+    );
+
+    try {
+      const { error } = await supabase.from('appointments').update({
+        status,
+        updated_at: updatedApt.updatedAt,
+      }).eq('id', id);
+      if (error && error.code !== 'PGRST205') {
+        console.warn('Supabase appointments status update:', error.message);
+      }
+    } catch (e) {
+      // Table may not exist yet
+    }
+
+    return { ok: true };
+  }
+
+  async deleteAppointment(id: string): Promise<{ ok: boolean; message?: string }> {
+    const list = this.getAppointments();
+    const target = list.find((a) => a.id === id);
+    if (!target) return { ok: false, message: 'Agendamento não encontrado' };
+
+    const updatedList = list.filter((a) => a.id !== id);
+    this.set(STORAGE_KEYS.APPOINTMENTS, updatedList);
+    this.logAudit(
+      'EXCLUSAO_AGENDAMENTO',
+      `Agendamento de ${target.date} às ${target.startTime} cancelado.`
+    );
+
+    try {
+      const { error } = await supabase.from('appointments').delete().eq('id', id);
+      if (error && error.code !== 'PGRST205') {
+        console.warn('Supabase appointments delete:', error.message);
+      }
+    } catch (e) {
+      // Table may not exist yet
+    }
+
+    return { ok: true };
+  }
+
   // Reset cache and re-sync from Supabase
   resetDemoData(): void {
     localStorage.removeItem(STORAGE_KEYS.PROFILES);
@@ -947,6 +1191,7 @@ class ClinicalStorageService {
     localStorage.removeItem(STORAGE_KEYS.INSURANCE_PLANS);
     localStorage.removeItem(STORAGE_KEYS.AUDIT_LOGS);
     localStorage.removeItem(STORAGE_KEYS.CLINIC_SETTINGS);
+    localStorage.removeItem(STORAGE_KEYS.APPOINTMENTS);
     this.setCurrentUser(INITIAL_PROFILES[0]);
     this.syncFromSupabase();
   }

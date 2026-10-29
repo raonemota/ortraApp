@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type UserRole = 'admin' | 'physio';
+export type UserRole = 'admin' | 'physio' | 'receptionist';
 
 export interface UserProfile {
   id: string;
@@ -179,3 +179,35 @@ export interface ClinicSettings {
   technicalResponsible: string;
   technicalResponsibleCrefito: string;
 }
+
+export type AppointmentStatus =
+  | 'scheduled'      // Agendado
+  | 'confirmed'      // Confirmado
+  | 'in_progress'    // Em Atendimento
+  | 'completed'      // Concluído
+  | 'missed'         // Falta
+  | 'cancelled';     // Cancelado
+
+export type AppointmentModality =
+  | 'particular'
+  | 'convenio'
+  | 'cartao_ortra'
+  | 'retorno';
+
+export interface Appointment {
+  id: string;
+  patientId: string;
+  physioId: string;
+  date: string; // YYYY-MM-DD
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+  modality: AppointmentModality;
+  serviceType: string; // ex: 'Cinesioterapia', 'Eletroterapia', 'Fisioterapia Ortopédica', 'RPG', 'Avaliação'
+  status: AppointmentStatus;
+  notes?: string;
+  sessionValue?: number;
+  recurrenceGroupId?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+

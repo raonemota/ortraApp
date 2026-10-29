@@ -11,12 +11,16 @@ import {
   Patient,
   Assessment,
   Evolution,
+  Appointment,
+  AppointmentStatus,
 } from './types/index.ts';
 import { hasAdminPrivileges } from './utils/clinicalCalculations.ts';
 
 // Components
 import { Header } from './components/Header.tsx';
 import { LoginView } from './components/LoginView.tsx';
+import { ScheduleView } from './components/ScheduleView.tsx';
+import { AppointmentModal } from './components/AppointmentModal.tsx';
 import { PatientsListView } from './components/PatientsListView.tsx';
 import { PatientDetailView } from './components/PatientDetailView.tsx';
 import { NewAssessmentView } from './components/NewAssessmentView.tsx';
@@ -33,8 +37,8 @@ export default function App() {
     clinicalStorage.isAuthenticated()
   );
 
-  // Active view: 'patients' | 'financial' | 'admin'
-  const [currentView, setCurrentView] = useState<'patients' | 'financial' | 'admin'>('patients');
+  // Active view: 'schedule' | 'patients' | 'financial' | 'admin' (Padrão: Agenda do Dia)
+  const [currentView, setCurrentView] = useState<'schedule' | 'patients' | 'financial' | 'admin'>('schedule');
 
   // Application Data States
   const [currentUser, setCurrentUser] = useState<UserProfile>(() => clinicalStorage.getCurrentUser());
@@ -44,6 +48,18 @@ export default function App() {
     clinicalStorage.getAssessments()
   );
   const [evolutions, setEvolutions] = useState<Evolution[]>(() => clinicalStorage.getEvolutions());
+  const [appointments, setAppointments] = useState<Appointment[]>(() =>
+    clinicalStorage.getAppointments()
+  );
+
+  // Schedule view states
+  const [selectedDate, setSelectedDate] = useState<string>(() =>
+    new Date().toISOString().split('T')[0]
+  );
+  const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
+  const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
+  const [appointmentPrefilledDate, setAppointmentPrefilledDate] = useState<string | undefined>(undefined);
+  const [activeAppointmentForEvolution, setActiveAppointmentForEvolution] = useState<Appointment | null>(null);
 
   // Deep clinical view state
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
@@ -65,24 +81,17 @@ export default function App() {
     setPatients(clinicalStorage.getPatients());
     setAssessments(clinicalStorage.getAssessments());
     setEvolutions(clinicalStorage.getEvolutions());
+    setAppointments(clinicalStorage.getAppointments());
   };
 
   // Sync with Supabase & listen for auth changes on mount
   useEffect(() => {
-    // Check existing Supabase Auth session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setIsAuthenticated(true);
-      }
-    });
-
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT') {
+      if (event === 'SIGNED_OUT' || !session) {
         setIsAuthenticated(false);
-      } else if (session?.user) {
-        setIsAuthenticated(true);
+        clinicalStorage.setAuthenticated(false);
       }
     });
 
@@ -97,10 +106,12 @@ export default function App() {
     };
   }, []);
 
-  // RBAC safety check: if user loses admin privileges and is in admin view, return to patients
+  // RBAC safety check: enforce strict role boundaries
   useEffect(() => {
-    if (currentView === 'admin' && !hasAdminPrivileges(currentUser)) {
-      setCurrentView('patients');
+    if (currentUser.role === 'receptionist' && currentView !== 'schedule') {
+      setCurrentView('schedule');
+    } else if (currentView === 'admin' && !hasAdminPrivileges(currentUser)) {
+      setCurrentView('schedule');
     }
   }, [currentView, currentUser]);
 
@@ -108,8 +119,10 @@ export default function App() {
   const handleUserSwitch = (newUser: UserProfile) => {
     clinicalStorage.setCurrentUser(newUser);
     setCurrentUser(newUser);
-    if (!hasAdminPrivileges(newUser) && currentView === 'admin') {
-      setCurrentView('patients');
+    if (newUser.role === 'receptionist') {
+      setCurrentView('schedule');
+    } else if (!hasAdminPrivileges(newUser) && currentView === 'admin') {
+      setCurrentView('schedule');
     }
   };
 
@@ -152,10 +165,40 @@ export default function App() {
 
   // Handler for New Evolution
   const handleOpenEvolution = (pat: Patient) => {
+    setActiveAppointmentForEvolution(null);
     setEvolutionPatient(pat);
   };
 
-  const handleEvolutionSaved = () => {
+  const handleStartEvolutionFromSchedule = (patient: Patient, appointment: Appointment) => {
+    setActiveAppointmentForEvolution(appointment);
+    setEvolutionPatient(patient);
+  };
+
+  const handleEvolutionSaved = async () => {
+    if (activeAppointmentForEvolution) {
+      await clinicalStorage.updateAppointmentStatus(activeAppointmentForEvolution.id, 'completed');
+      setActiveAppointmentForEvolution(null);
+    }
+    refreshData();
+  };
+
+  // Handlers for Appointments / Agenda
+  const handleSaveAppointments = async (apts: Appointment[]) => {
+    if (apts.length === 1) {
+      await clinicalStorage.saveAppointment(apts[0]);
+    } else if (apts.length > 1) {
+      await clinicalStorage.saveMultipleAppointments(apts);
+    }
+    refreshData();
+  };
+
+  const handleUpdateAppointmentStatus = async (id: string, status: AppointmentStatus) => {
+    await clinicalStorage.updateAppointmentStatus(id, status);
+    refreshData();
+  };
+
+  const handleDeleteAppointment = async (id: string) => {
+    await clinicalStorage.deleteAppointment(id);
     refreshData();
   };
 
@@ -184,6 +227,9 @@ export default function App() {
         profiles={profiles}
         currentView={currentView}
         onViewChange={(view) => {
+          if (currentUser.role === 'receptionist' && view !== 'schedule') {
+            return;
+          }
           setSelectedPatientId(null);
           setIsCreatingAssessment(false);
           setCurrentView(view);
@@ -194,6 +240,35 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+        {/* VIEW 0: SCHEDULE / AGENDA DE ATENDIMENTOS (PAINEL DO DIA) */}
+        {currentView === 'schedule' && (
+          <ScheduleView
+            currentUser={currentUser}
+            physioList={profiles}
+            patients={patients}
+            appointments={appointments}
+            selectedDate={selectedDate}
+            onSelectDate={setSelectedDate}
+            onOpenNewAppointment={(prefilled) => {
+              setAppointmentPrefilledDate(prefilled);
+              setEditingAppointment(null);
+              setIsAppointmentModalOpen(true);
+            }}
+            onEditAppointment={(apt) => {
+              setEditingAppointment(apt);
+              setIsAppointmentModalOpen(true);
+            }}
+            onDeleteAppointment={handleDeleteAppointment}
+            onUpdateStatus={handleUpdateAppointmentStatus}
+            onStartEvolution={handleStartEvolutionFromSchedule}
+            onViewPatientRecord={(patientId) => {
+              if (currentUser.role === 'receptionist') return;
+              setSelectedPatientId(patientId);
+              setCurrentView('patients');
+            }}
+          />
+        )}
+
         {/* VIEW 1: PATIENTS & CLINICAL RECORDS */}
         {currentView === 'patients' && (
           <>
@@ -263,6 +338,25 @@ export default function App() {
       </main>
 
       {/* Modals & Overlays */}
+      <AppointmentModal
+        isOpen={isAppointmentModalOpen}
+        onClose={() => {
+          setIsAppointmentModalOpen(false);
+          setEditingAppointment(null);
+          setAppointmentPrefilledDate(undefined);
+        }}
+        onSave={handleSaveAppointments}
+        patients={patients}
+        physiotherapists={profiles}
+        currentUser={currentUser}
+        initialDate={appointmentPrefilledDate || selectedDate}
+        existingAppointment={editingAppointment}
+        onOpenNewPatientModal={() => {
+          setEditingPatient(null);
+          setIsPatientModalOpen(true);
+        }}
+      />
+
       <PatientFormModal
         isOpen={isPatientModalOpen}
         currentUser={currentUser}

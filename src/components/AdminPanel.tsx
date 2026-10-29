@@ -59,8 +59,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     'physios' | 'transfer' | 'insurance' | 'settings' | 'audit'
   >('physios');
 
-  // New Physio Form
+  // New User Form
   const [isAddingPhysio, setIsAddingPhysio] = useState(false);
+  const [newUserRole, setNewUserRole] = useState<'physio' | 'receptionist' | 'admin'>('physio');
   const [physioName, setPhysioName] = useState('');
   const [physioGender, setPhysioGender] = useState<'M' | 'F'>('M');
   const [physioIsAdmin, setPhysioIsAdmin] = useState(false);
@@ -105,13 +106,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Audit Logs
   const auditLogs: AuditLog[] = clinicalStorage.getAuditLogs();
 
-  // Create new physio directly via Supabase database
+  // Create new user (physio, receptionist, or admin) directly via Supabase database
   const handleCreatePhysio = async (e: React.FormEvent) => {
     e.preventDefault();
     setPhysioError(null);
     setPhysioSqlFix(null);
     const cleanName = getCleanPersonName(physioName);
-    if (!cleanName || !physioEmail.trim() || !physioCrefito.trim()) {
+    if (!cleanName || !physioEmail.trim()) {
+      return;
+    }
+    if (newUserRole === 'physio' && !physioCrefito.trim()) {
       return;
     }
 
@@ -122,35 +126,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         id: generateUUID(),
         fullName: cleanName,
         gender: physioGender,
-        isAdmin: physioIsAdmin,
+        isAdmin: newUserRole === 'admin' || physioIsAdmin,
         password: tempPassword,
         email: physioEmail.trim().toLowerCase(),
         phone: physioPhone.trim(),
-        crefito: physioCrefito.trim(),
-        role: 'physio',
-        commissionRate: Number(physioCommission) || 60,
+        crefito: newUserRole === 'physio' ? physioCrefito.trim() : undefined,
+        role: newUserRole,
+        commissionRate: newUserRole === 'physio' ? (Number(physioCommission) || 60) : 0,
         mustChangePassword: true,
         hasCompletedTour: false,
         active: true,
         createdAt: new Date().toISOString(),
       };
 
-      const res = await clinicalStorage.saveProfile(newProfile);
+      const res = await clinicalStorage.saveProfile(newProfile, true);
       if (!res.success) {
         if (res.sqlFix) {
           setPhysioSqlFix(res.sqlFix);
           setPhysioError(res.error || 'A tabela profiles possui restrição de chave estrangeira.');
           onProfilesUpdated();
         } else {
-          setPhysioError(`Erro ao salvar fisioterapeuta no Supabase: ${res.error || 'Falha de gravação'}`);
+          setPhysioError(`Erro ao salvar usuário no Supabase: ${res.error || 'Falha de gravação'}`);
         }
         setIsSavingPhysio(false);
         return;
       }
 
       clinicalStorage.logAudit(
-        'CADASTRO_FISIOTERAPEUTA',
-        `Fisioterapeuta cadastrado na base Supabase: ${formatPhysioDisplayName(newProfile)} (${newProfile.crefito}) - Admin: ${physioIsAdmin ? 'Sim' : 'Não'}. Gerada senha provisória.`
+        'CADASTRO_USUARIO',
+        `Usuário cadastrado na base Supabase: ${formatPhysioDisplayName(newProfile)} (${newUserRole === 'receptionist' ? 'Recepção' : newUserRole === 'admin' ? 'Administrador' : newProfile.crefito}). Gerada senha provisória.`
       );
 
       setTempPasswordNotice({
@@ -160,6 +164,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
       setPhysioName('');
       setPhysioGender('M');
+      setNewUserRole('physio');
       setPhysioIsAdmin(false);
       setPhysioEmail('');
       setPhysioPhone('');
@@ -168,7 +173,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setIsAddingPhysio(false);
       onProfilesUpdated();
     } catch (err: any) {
-      setPhysioError(`Falha inesperada: ${err?.message || 'Erro de rede'}`);
+      setPhysioError(err?.message || 'Falha ao registrar novo profissional');
     } finally {
       setIsSavingPhysio(false);
     }
@@ -328,22 +333,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* Temp Password Notice Popup */}
       {tempPasswordNotice && (
         <div className="rounded-xl border border-teal-300 bg-teal-50 p-3 sm:p-4 text-xs text-teal-900 flex items-start justify-between shadow-xs">
-          <div className="space-y-1">
-            <span className="font-bold text-sm block flex items-center gap-1.5">
+          <div className="space-y-1.5">
+            <span className="font-bold text-sm block flex items-center gap-1.5 text-teal-800">
               <CheckCircle className="h-4 w-4 text-teal-700" />
-              Senha Provisória Gerada com Sucesso
+              Usuário Registrado com Sucesso no Supabase Authentication
             </span>
             <p>
               E-mail do Profissional: <strong>{tempPasswordNotice.email}</strong>
             </p>
             <p>
-              Senha Provisória:{' '}
+              Senha Provisória de Acesso:{' '}
               <code className="bg-teal-200/60 px-2 py-0.5 rounded font-mono font-bold text-slate-900">
                 {tempPasswordNotice.tempPass}
               </code>
             </p>
-            <p className="text-slate-600">
-              No primeiro acesso, o sistema exigirá a troca para uma senha pessoal definitiva.
+            <p className="text-[11px] text-teal-800/90 leading-relaxed">
+              O usuário foi registrado na base de autenticação (<code>auth.users</code>) e vinculado à tabela de perfis (<code>public.profiles</code>).
+            </p>
+            <p className="text-[11px] text-slate-600">
+              No primeiro acesso, o sistema solicitará a troca para uma senha pessoal definitiva.
             </p>
           </div>
           <button
@@ -456,38 +464,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <p className="font-bold">{physioError}</p>
                       {physioSqlFix && (
                         <p className="text-[11px] text-amber-800 leading-relaxed">
-                          Para liberar o cadastro de profissionais diretamente pelo Administrador na base do Supabase, execute o comando abaixo no <strong>SQL Editor</strong> do seu painel Supabase:
+                          Para liberar o cadastro de novos usuários no <code>auth.users</code> do Supabase, execute o script abaixo no <strong>SQL Editor</strong> do painel Supabase:
                         </p>
                       )}
                     </div>
                   </div>
 
                   {physioSqlFix && (
-                    <div className="bg-slate-900 rounded-lg p-2.5 flex items-center justify-between gap-2 overflow-x-auto shadow-inner">
-                      <code className="text-teal-300 font-mono text-[11px] select-all">
+                    <div className="bg-slate-900 rounded-lg p-3 space-y-2 shadow-inner">
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-700/60 pb-1.5">
+                        <span className="text-[10px] uppercase tracking-wider font-mono text-teal-400 font-bold">SQL Editor Script</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(physioSqlFix);
+                            setCopiedSql(true);
+                            setTimeout(() => setCopiedSql(false), 2500);
+                          }}
+                          className="px-2.5 py-1 rounded bg-teal-700 hover:bg-teal-600 text-white font-sans text-[10px] font-bold flex items-center gap-1 shrink-0 transition-colors"
+                        >
+                          {copiedSql ? (
+                            <>
+                              <Check className="h-3 w-3" />
+                              <span>Copiado!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-3 w-3" />
+                              <span>Copiar Script SQL</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <pre className="text-teal-300 font-mono text-[11px] select-all whitespace-pre-wrap overflow-x-auto max-h-48 leading-relaxed">
                         {physioSqlFix}
-                      </code>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(physioSqlFix);
-                          setCopiedSql(true);
-                          setTimeout(() => setCopiedSql(false), 2500);
-                        }}
-                        className="px-2.5 py-1 rounded bg-teal-700 hover:bg-teal-600 text-white font-sans text-[10px] font-bold flex items-center gap-1 shrink-0 transition-colors"
-                      >
-                        {copiedSql ? (
-                          <>
-                            <Check className="h-3 w-3" />
-                            <span>Copiado!</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="h-3 w-3" />
-                            <span>Copiar SQL</span>
-                          </>
-                        )}
-                      </button>
+                      </pre>
                     </div>
                   )}
                 </div>
@@ -496,14 +507,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <form onSubmit={handleCreatePhysio} className="space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
                   <div>
+                    <label htmlFor="new-user-role" className="block text-xs font-semibold text-slate-700 mb-1">
+                      Função no Sistema *
+                    </label>
+                    <select
+                      id="new-user-role"
+                      value={newUserRole}
+                      onChange={(e) => setNewUserRole(e.target.value as any)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 font-bold"
+                    >
+                      <option value="physio">Fisioterapeuta Clínico</option>
+                      <option value="receptionist">Recepção / Organização da Agenda</option>
+                      <option value="admin">Administrador Geral</option>
+                    </select>
+                  </div>
+
+                  <div>
                     <label htmlFor="new-physio-name" className="block text-xs font-semibold text-slate-700 mb-1">
-                      Nome do Profissional (sem Dr/Dra) *
+                      Nome Completo (sem Dr/Dra) *
                     </label>
                     <input
                       id="new-physio-name"
                       type="text"
                       required
-                      placeholder="Ex: Marcelo Carvalho"
+                      placeholder={newUserRole === 'receptionist' ? 'Ex: Juliana Santana' : 'Ex: Marcelo Carvalho'}
                       value={physioName}
                       onChange={(e) => setPhysioName(e.target.value)}
                       className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
@@ -512,7 +539,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                   <div>
                     <label htmlFor="new-physio-gender" className="block text-xs font-semibold text-slate-700 mb-1">
-                      Sexo / Tratamento Profissional *
+                      Sexo / Tratamento *
                     </label>
                     <select
                       id="new-physio-gender"
@@ -520,8 +547,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       onChange={(e) => setPhysioGender(e.target.value as 'M' | 'F')}
                       className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
                     >
-                      <option value="M">Masculino (Prefixo Dr.)</option>
-                      <option value="F">Feminino (Prefixo Dra.)</option>
+                      <option value="M">Masculino {newUserRole === 'physio' ? '(Dr.)' : ''}</option>
+                      <option value="F">Feminino {newUserRole === 'physio' ? '(Dra.)' : ''}</option>
                     </select>
                   </div>
 
@@ -540,54 +567,64 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     />
                   </div>
 
-                  <div>
-                    <label htmlFor="new-physio-crefito" className="block text-xs font-semibold text-slate-700 mb-1">
-                      CREFITO *
-                    </label>
-                    <input
-                      id="new-physio-crefito"
-                      type="text"
-                      required
-                      placeholder="CREFITO-7/12345-F"
-                      value={physioCrefito}
-                      onChange={(e) => {
-                        let val = e.target.value;
-                        if (!val.startsWith('CREFITO-')) {
-                          const suffix = val.replace(/^C?R?E?F?I?T?O?-?/i, '');
-                          val = 'CREFITO-' + suffix;
-                        }
-                        setPhysioCrefito(val);
-                      }}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 font-medium"
-                    />
-                  </div>
+                  {newUserRole === 'physio' && (
+                    <>
+                      <div>
+                        <label htmlFor="new-physio-crefito" className="block text-xs font-semibold text-slate-700 mb-1">
+                          CREFITO *
+                        </label>
+                        <input
+                          id="new-physio-crefito"
+                          type="text"
+                          required
+                          placeholder="CREFITO-7/12345-F"
+                          value={physioCrefito}
+                          onChange={(e) => {
+                            let val = e.target.value;
+                            if (!val.startsWith('CREFITO-')) {
+                              const suffix = val.replace(/^C?R?E?F?I?T?O?-?/i, '');
+                              val = 'CREFITO-' + suffix;
+                            }
+                            setPhysioCrefito(val);
+                          }}
+                          className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 font-medium"
+                        />
+                      </div>
 
-                  <div>
-                    <label htmlFor="new-physio-comm" className="block text-xs font-semibold text-slate-700 mb-1">
-                      Taxa de Repasse (%)
-                    </label>
-                    <input
-                      id="new-physio-comm"
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={physioCommission}
-                      onChange={(e) => setPhysioCommission(Number(e.target.value))}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-900"
-                    />
-                  </div>
+                      <div>
+                        <label htmlFor="new-physio-comm" className="block text-xs font-semibold text-slate-700 mb-1">
+                          Taxa de Repasse (%)
+                        </label>
+                        <input
+                          id="new-physio-comm"
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={physioCommission}
+                          onChange={(e) => setPhysioCommission(Number(e.target.value))}
+                          className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-900"
+                        />
+                      </div>
 
-                  <div className="flex items-center pt-5">
-                    <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-800">
-                      <input
-                        type="checkbox"
-                        checked={physioIsAdmin}
-                        onChange={(e) => setPhysioIsAdmin(e.target.checked)}
-                        className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                      />
-                      <span>Conceder também perfil Administrador (Fisio & Admin)</span>
-                    </label>
-                  </div>
+                      <div className="flex items-center pt-5">
+                        <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={physioIsAdmin}
+                            onChange={(e) => setPhysioIsAdmin(e.target.checked)}
+                            className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                          />
+                          <span>Conceder também perfil Administrador (Fisio & Admin)</span>
+                        </label>
+                      </div>
+                    </>
+                  )}
+
+                  {newUserRole === 'receptionist' && (
+                    <div className="col-span-full p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-900">
+                      <strong>Perfil Recepção / Atendimento:</strong> Acesso focado exclusivamente na organização da agenda de todos os profissionais. Não possui acesso aos prontuários clínicos dos pacientes nem às áreas administrativas e financeiras da clínica.
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-end gap-2 pt-1">
@@ -620,53 +657,77 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {profiles
-                    .filter((p) => p.role === 'physio')
-                    .map((p) => {
-                      const activePats = patients.filter((pat) => pat.physioId === p.id);
-                      const initial = getPersonInitials(p.fullName);
-                      const displayName = formatPhysioDisplayName(p);
-                      return (
-                        <tr key={p.id} className="hover:bg-slate-50/50">
-                          <td className="py-2.5 px-3">
-                            <div className="flex items-center gap-2">
-                              {/* Avatar with true initials (M for Marcelo, C for Camila) */}
-                              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-50 border border-teal-200 text-teal-800 font-black text-xs uppercase shrink-0">
-                                {initial}
-                              </div>
-                              <div>
-                                <span className="font-bold text-slate-900 block">{displayName}</span>
-                                <span className="text-[10px] text-slate-400">{p.email}</span>
-                              </div>
+                  {profiles.map((p) => {
+                    const activePats = patients.filter((pat) => pat.physioId === p.id);
+                    const initial = getPersonInitials(p.fullName);
+                    const displayName = formatPhysioDisplayName(p);
+                    const isRec = p.role === 'receptionist';
+                    const isPureAdmin = p.role === 'admin';
+
+                    return (
+                      <tr key={p.id} className="hover:bg-slate-50/50">
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className={`flex h-7 w-7 items-center justify-center rounded-lg border font-black text-xs uppercase shrink-0 ${
+                                isRec
+                                  ? 'bg-blue-50 border-blue-200 text-blue-800'
+                                  : isPureAdmin
+                                  ? 'bg-amber-50 border-amber-200 text-amber-800'
+                                  : 'bg-teal-50 border-teal-200 text-teal-800'
+                              }`}
+                            >
+                              {initial}
                             </div>
-                          </td>
+                            <div>
+                              <span className="font-bold text-slate-900 block">{displayName}</span>
+                              <span className="text-[10px] text-slate-400">{p.email}</span>
+                            </div>
+                          </div>
+                        </td>
 
-                          <td className="py-2.5 px-3 font-semibold text-slate-800">
-                            {p.crefito || 'CREFITO-7'}
-                          </td>
+                        <td className="py-2.5 px-3 font-semibold text-slate-800">
+                          {isRec ? '-' : p.crefito || 'CREFITO-7'}
+                        </td>
 
-                          <td className="py-2.5 px-3">
+                        <td className="py-2.5 px-3">
+                          {isRec ? (
+                            <span className="text-slate-400 text-xs">-</span>
+                          ) : (
                             <span className="font-bold text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200 text-[11px]">
                               {p.commissionRate}%
                             </span>
-                          </td>
+                          )}
+                        </td>
 
-                          <td className="py-2.5 px-3 font-semibold text-slate-800">
-                            {activePats.length}
-                          </td>
+                        <td className="py-2.5 px-3 font-semibold text-slate-800">
+                          {isRec ? '-' : activePats.length}
+                        </td>
 
-                          <td className="py-2.5 px-3">
-                            <div className="flex items-center gap-1">
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center gap-1">
+                            {isRec && (
+                              <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                                Recepção / Agenda
+                              </span>
+                            )}
+                            {isPureAdmin && (
+                              <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                                Administrador
+                              </span>
+                            )}
+                            {p.role === 'physio' && (
                               <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200">
                                 Fisio
                               </span>
-                              {p.isAdmin && (
-                                <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                                  Admin
-                                </span>
-                              )}
-                            </div>
-                          </td>
+                            )}
+                            {p.role === 'physio' && p.isAdmin && (
+                              <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                                Admin
+                              </span>
+                            )}
+                          </div>
+                        </td>
 
                           <td className="py-2.5 px-3">
                             {p.active ? (

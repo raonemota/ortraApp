@@ -22,6 +22,18 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 /**
+ * Cliente isolado para provisionar novos usuários no Supabase Auth (auth.users)
+ * sem substituir nem sobrescrever a sessão do administrador logado no navegador.
+ */
+export const authAdminClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+  },
+});
+
+/**
  * Helper to check whether Supabase connectivity is active
  */
 export async function testSupabaseConnection(): Promise<{ ok: boolean; message: string }> {

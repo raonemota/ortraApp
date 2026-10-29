@@ -248,7 +248,7 @@ export function formatPhysioDisplayName(profile: {
   const clean = getCleanPersonName(profile.fullName);
   if (!clean) return '';
 
-  if (profile.role === 'admin' && !profile.crefito) {
+  if ((profile.role === 'admin' || profile.role === 'receptionist') && !profile.crefito) {
     return clean;
   }
 
@@ -264,5 +264,35 @@ export function hasAdminPrivileges(
 ): boolean {
   if (!user) return false;
   return user.role === 'admin' || Boolean(user.isAdmin);
+}
+
+/**
+ * Checks if a user is a receptionist
+ */
+export function isReceptionist(
+  user: { role?: string } | null | undefined
+): boolean {
+  if (!user) return false;
+  return user.role === 'receptionist';
+}
+
+/**
+ * Formats a date string (YYYY-MM-DD) into compact/abbreviated Portuguese for mobile screens
+ * Ex: "qui., 29 de out. de 2026"
+ */
+export function formatDateCompact(dateStr: string): string {
+  if (!dateStr) return '';
+  try {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dateObj = new Date(y, m - 1, d);
+    return new Intl.DateTimeFormat('pt-BR', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    }).format(dateObj);
+  } catch {
+    return dateStr;
+  }
 }
 

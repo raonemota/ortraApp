@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import {
+  Calendar,
   Users,
   DollarSign,
   ShieldCheck,
@@ -25,8 +26,8 @@ import {
 interface HeaderProps {
   currentUser: UserProfile;
   profiles: UserProfile[];
-  currentView: 'patients' | 'financial' | 'admin';
-  onViewChange: (view: 'patients' | 'financial' | 'admin') => void;
+  currentView: 'schedule' | 'patients' | 'financial' | 'admin';
+  onViewChange: (view: 'schedule' | 'patients' | 'financial' | 'admin') => void;
   onUserSwitch: (user: UserProfile) => void;
   onLogout: () => void;
 }
@@ -60,7 +61,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center gap-3 sm:gap-6">
             <button
               type="button"
-              onClick={() => onViewChange('patients')}
+              onClick={() => onViewChange('schedule')}
               className="flex items-center gap-2.5 text-left focus:outline-none group"
             >
               <img
@@ -85,29 +86,48 @@ export const Header: React.FC<HeaderProps> = ({
             <nav className="hidden md:flex items-center gap-1 border-l border-slate-800 pl-4 lg:pl-6">
               <button
                 type="button"
-                onClick={() => onViewChange('patients')}
+                onClick={() => onViewChange('schedule')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  currentView === 'patients'
+                  currentView === 'schedule'
                     ? 'bg-teal-950/80 text-teal-300 border border-teal-800/60'
                     : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
                 }`}
               >
-                <Users className="h-4 w-4" />
-                <span>Pacientes & Prontuários</span>
+                <Calendar className="h-4 w-4" />
+                <span>Agenda</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => onViewChange('financial')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  currentView === 'financial'
-                    ? 'bg-teal-950/80 text-teal-300 border border-teal-800/60'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                }`}
-              >
-                <DollarSign className="h-4 w-4" />
-                <span>Financeiro & Repasse</span>
-              </button>
+              {/* Pacientes e Prontuários: Apenas Fisioterapeutas e Administradores (Recepção não tem acesso) */}
+              {currentUser.role !== 'receptionist' && (
+                <button
+                  type="button"
+                  onClick={() => onViewChange('patients')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    currentView === 'patients'
+                      ? 'bg-teal-950/80 text-teal-300 border border-teal-800/60'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  <Users className="h-4 w-4" />
+                  <span>Pacientes & Prontuários</span>
+                </button>
+              )}
+
+              {/* Financeiro: Apenas Fisioterapeutas e Administradores (Recepção não tem acesso) */}
+              {currentUser.role !== 'receptionist' && (
+                <button
+                  type="button"
+                  onClick={() => onViewChange('financial')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    currentView === 'financial'
+                      ? 'bg-teal-950/80 text-teal-300 border border-teal-800/60'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  <DollarSign className="h-4 w-4" />
+                  <span>Financeiro & Repasse</span>
+                </button>
+              )}
 
               {isAdmin && (
                 <button
@@ -164,6 +184,11 @@ export const Header: React.FC<HeaderProps> = ({
                           Fisio
                         </span>
                       )}
+                      {currentUser.role === 'receptionist' && (
+                        <span className="text-[9px] uppercase font-black px-1 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40">
+                          Recepção
+                        </span>
+                      )}
                       {(currentUser.role === 'admin' || currentUser.isAdmin) && (
                         <span className="text-[9px] uppercase font-black px-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
                           Admin
@@ -172,7 +197,7 @@ export const Header: React.FC<HeaderProps> = ({
                     </div>
                   </div>
                   <span className="text-[10px] text-slate-400 block truncate">
-                    {currentUser.crefito || currentUser.email}
+                    {currentUser.crefito || (currentUser.role === 'receptionist' ? 'Recepção / Agenda' : currentUser.email)}
                   </span>
                 </div>
                 <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
@@ -186,46 +211,51 @@ export const Header: React.FC<HeaderProps> = ({
                     onClick={() => setUserDropdownOpen(false)}
                   />
                   <div className="absolute right-0 mt-2 w-64 rounded-xl bg-white text-slate-900 shadow-xl border border-slate-200 py-2 z-50">
-                  <div className="px-3 py-1.5 border-b border-slate-100">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                      Alternar Perfil Ativo (Demo)
-                    </span>
-                  </div>
+                  {isAdmin && (
+                    <>
+                      <div className="px-3 py-1.5 border-b border-slate-100">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                          Alternar Perfil Ativo (Admin)
+                        </span>
+                      </div>
 
-                  <div className="max-h-56 overflow-y-auto py-1">
-                    {profiles.map((p) => {
-                      const isCurrent = p.id === currentUser.id;
-                      const pDisplayName = formatPhysioDisplayName(p);
-                      return (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => {
-                            onUserSwitch(p);
-                            setUserDropdownOpen(false);
-                          }}
-                          className={`w-full flex items-center justify-between px-3 py-2 text-left text-xs transition-colors ${
-                            isCurrent
-                              ? 'bg-teal-50 font-bold text-teal-900'
-                              : 'hover:bg-slate-50 text-slate-700'
-                          }`}
-                        >
-                          <div>
-                            <span className="block">{pDisplayName}</span>
-                            <span className="text-[10px] text-slate-400">
-                              {p.role === 'admin'
-                                ? 'Administrador Geral'
-                                : p.isAdmin
-                                ? 'Fisio & Administrador'
-                                : p.crefito}
-                              {p.mustChangePassword ? ' · Troca Senha' : ''}
-                            </span>
-                          </div>
-                          {isCurrent && <UserCheck className="h-4 w-4 text-teal-600 shrink-0" />}
-                        </button>
-                      );
-                    })}
-                  </div>
+                      <div className="max-h-56 overflow-y-auto py-1">
+                        {profiles.map((p) => {
+                          const isCurrent = p.id === currentUser.id;
+                          const pDisplayName = formatPhysioDisplayName(p);
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => {
+                                onUserSwitch(p);
+                                setUserDropdownOpen(false);
+                              }}
+                              className={`w-full flex items-center justify-between px-3 py-2 text-left text-xs transition-colors ${
+                                isCurrent
+                                  ? 'bg-teal-50 font-bold text-teal-900'
+                                  : 'hover:bg-slate-50 text-slate-700'
+                              }`}
+                            >
+                              <div>
+                                <span className="block">{pDisplayName}</span>
+                                <span className="text-[10px] text-slate-400">
+                                  {p.role === 'admin'
+                                    ? 'Administrador Geral'
+                                    : p.role === 'receptionist'
+                                    ? 'Recepção / Agenda'
+                                    : p.isAdmin
+                                    ? 'Fisio & Administrador'
+                                    : p.crefito}
+                                </span>
+                              </div>
+                              {isCurrent && <UserCheck className="h-4 w-4 text-teal-700" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
 
                   <div className="border-t border-slate-100 pt-1.5 px-2">
                     <button
@@ -251,29 +281,48 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="md:hidden flex items-center justify-around py-1.5 border-t border-slate-800 text-[11px]">
           <button
             type="button"
-            onClick={() => onViewChange('patients')}
+            onClick={() => onViewChange('schedule')}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-semibold transition-colors ${
-              currentView === 'patients'
+              currentView === 'schedule'
                 ? 'bg-teal-950 text-teal-300'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Users className="h-3.5 w-3.5" />
-            <span>Pacientes</span>
+            <Calendar className="h-3.5 w-3.5" />
+            <span>Agenda</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => onViewChange('financial')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-semibold transition-colors ${
-              currentView === 'financial'
-                ? 'bg-teal-950 text-teal-300'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <DollarSign className="h-3.5 w-3.5" />
-            <span>Financeiro</span>
-          </button>
+          {/* Pacientes: Somente Fisioterapeutas e Admins */}
+          {currentUser.role !== 'receptionist' && (
+            <button
+              type="button"
+              onClick={() => onViewChange('patients')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-semibold transition-colors ${
+                currentView === 'patients'
+                  ? 'bg-teal-950 text-teal-300'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Users className="h-3.5 w-3.5" />
+              <span>Pacientes</span>
+            </button>
+          )}
+
+          {/* Financeiro: Somente Fisioterapeutas e Admins */}
+          {currentUser.role !== 'receptionist' && (
+            <button
+              type="button"
+              onClick={() => onViewChange('financial')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-semibold transition-colors ${
+                currentView === 'financial'
+                  ? 'bg-teal-950 text-teal-300'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <DollarSign className="h-3.5 w-3.5" />
+              <span>Financeiro</span>
+            </button>
+          )}
 
           {isAdmin && (
             <button
@@ -286,7 +335,7 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               <ShieldCheck className="h-3.5 w-3.5" />
-              <span>Administrativo</span>
+              <span>Admin</span>
             </button>
           )}
         </div>
